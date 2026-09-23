@@ -1,4 +1,6 @@
-# Soba Player
+<p align="center"><img src="build/icon.png" width="128" alt="Soba Player icon"></p>
+
+<h1 align="center">Soba Player</h1>
 
 A minimal torrent streaming player for macOS. Drop a `.torrent` file, a magnet
 link or a local video into the window and it starts playing while the torrent
@@ -67,6 +69,9 @@ No analytics, no telemetry, no accounts. The app connects only to:
 - Intel Mac builds.
 
 ## Build from source
+
+This section is for developers. To just use the app, download it from
+Releases; it needs nothing else installed.
 
 Requires Node.js 20+, Xcode command line tools and an Apple Silicon Mac.
 
