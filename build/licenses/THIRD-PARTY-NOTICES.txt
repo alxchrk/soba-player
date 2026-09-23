@@ -41,7 +41,7 @@ Electron and Chromium
 ---------------------
 License: MIT (Electron); Chromium and its components under their own licenses
 Website: https://www.electronjs.org
-Notices: Contents/Resources/LICENSE and Contents/Resources/LICENSES.chromium.html
+Notices: Electron-LICENSE.txt and LICENSES.chromium.html in this folder
 
 
 Node.js packages
