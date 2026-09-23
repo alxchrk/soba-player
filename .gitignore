@@ -1,0 +1,13 @@
+/*
+!/.gitignore
+!/src/
+!/build/
+!/package.json
+!/package-lock.json
+!/README.md
+!/LICENSE
+
+/src/**/node_modules/
+/build/ffmpeg/src/
+/build/ffmpeg/bin/
+.DS_Store

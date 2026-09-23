@@ -1,0 +1,336 @@
+* { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+
+html, body {
+  width: 100%; height: 100%; margin: 0; padding: 0;
+  background: #000; color: #fff; overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body { -webkit-app-region: drag; }
+button, input, .no-drag, .continue, .progress, .menu, .modal, .surface, #player { -webkit-app-region: no-drag; }
+button:focus, button:focus-visible { outline: none; }
+
+/* Окно перетаскивается за полосу вверху и за фон нижней панели; видео (клик =
+   пауза), кнопки и таймлайн не перетаскивают. */
+.titlebar-drag {
+  position: fixed; top: 0; left: 0; right: 0; height: 36px; z-index: 40;
+  -webkit-app-region: drag;
+}
+.bar { -webkit-app-region: drag; }
+/* Drag-области считаются без учёта z-index: пока открыты настройки поверх плеера,
+   полоса и панель не должны перехватывать мышь у кнопок модалки. */
+body.modal-open .bar, body.modal-open .titlebar-drag { -webkit-app-region: no-drag; }
+
+.hidden { display: none !important; }
+.cursor-none { cursor: none; }
+
+/* --- Домашний экран --- */
+#home {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: #0d0d0f;
+}
+.home-inner { text-align: center; }
+.open-button {
+  font-size: 17px; font-weight: 600; color: #fff; background: #0a84ff;
+  border: none; border-radius: 8px; padding: 15px 26px; cursor: pointer;
+}
+.open-button:hover { background: #329bff; }
+.open-hint { margin-top: 14px; color: rgba(255,255,255,0.4); font-size: 13px; line-height: 1.5; }
+.continue { margin-top: 14px; font-size: 13px; color: rgba(255,255,255,0.6); cursor: pointer; }
+.continue:hover { color: #fff; }
+.continue b { color: #0a84ff; font-weight: 600; }
+.default-offer { margin-top: 26px; color: rgba(255,255,255,0.45); font-size: 12px; }
+.default-offer button {
+  background: none; border: none; cursor: pointer; font-size: 12px; padding: 4px 6px;
+}
+.offer-yes { color: #0a84ff; }
+.offer-no { color: rgba(255,255,255,0.35); }
+.default-offer button:hover { text-decoration: underline; }
+
+.gear-button {
+  position: fixed; top: 12px; right: 12px; z-index: 50;
+  background: none; border: none; cursor: pointer; padding: 6px; opacity: 0.5;
+}
+.gear-button:hover { opacity: 0.9; }
+.ico-gear { width: 22px; height: 22px; }
+
+/* --- Настройки --- */
+.modal {
+  position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center;
+  padding: 36px 14px 14px; background: rgba(0,0,0,0.6);
+}
+/* Карточка на всю ширину окна, при нехватке высоты прокручивается. */
+.modal-card {
+  background: #1b1b1e; border-radius: 12px; padding: 22px; width: 100%; max-height: 100%;
+  overflow-y: auto;
+}
+.modal-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+.modal-card-narrow { max-width: 420px; }
+/* Окно «О программе»: иконка, имя, версия, описание и ссылки по центру. */
+.about-card { text-align: center; }
+.about-card-icon { width: 96px; height: 96px; margin: 6px auto 12px; display: block; }
+.about-card-name { font-size: 18px; font-weight: 600; }
+.about-card-version { margin-top: 4px; font-size: 12px; color: rgba(255,255,255,0.4); }
+.about-card-desc { margin-top: 16px; font-size: 13px; color: rgba(255,255,255,0.8); }
+.about-card-author { margin-top: 6px; font-size: 12px; color: rgba(255,255,255,0.4); }
+.about-card-links { justify-content: center; }
+/* Список горячих клавиш: клавиши слева, действие справа. */
+.keys-grid { display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; align-items: center; font-size: 13px; color: rgba(255,255,255,0.8); }
+.keys-key { display: flex; gap: 4px; }
+.keys-key kbd {
+  font-family: inherit; font-size: 12px; line-height: 1; padding: 5px 7px; min-width: 24px; text-align: center;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 5px; color: #fff;
+}
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 36px; }
+@media (max-width: 640px) { .settings-grid { grid-template-columns: 1fr; } }
+.about {
+  margin-top: 22px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 12px;
+  display: grid; grid-template-columns: auto 1fr; column-gap: 12px; align-items: center;
+}
+.about-icon { width: 44px; height: 44px; grid-row: span 3; }
+.link-button { background: none; border: none; padding: 0; color: #0a84ff; font-size: 11px; cursor: pointer; }
+.link-button:hover { text-decoration: underline; }
+.os-help { margin-top: 10px; color: rgba(255,255,255,0.55); font-size: 12px; line-height: 1.5; }
+.os-help ol { margin: 4px 0 8px; padding-left: 18px; }
+.about-name { color: rgba(255,255,255,0.8); font-weight: 600; }
+.about-author { color: rgba(255,255,255,0.4); margin-top: 2px; }
+.about-links { margin-top: 8px; display: flex; gap: 14px; }
+.about-link { background: none; border: none; padding: 0; color: #0a84ff; font-size: 12px; cursor: pointer; }
+.about-link:hover { text-decoration: underline; }
+.setting {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 0; border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 13px; color: rgba(255,255,255,0.8); cursor: pointer;
+}
+/* Тумблер в стиле macOS: стеклянная дорожка, белая ручка. */
+.setting input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; flex: none; margin: 0;
+  width: 44px; height: 26px; border-radius: 13px; cursor: pointer; position: relative;
+  background: linear-gradient(rgba(255,255,255,0.10), rgba(255,255,255,0.04));
+  border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.05);
+  transition: background 0.2s, border-color 0.2s;
+}
+.setting input[type="checkbox"]::before {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%;
+  background: linear-gradient(#fff, #e6e6ea);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.45), 0 0 0 0.5px rgba(0,0,0,0.15);
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.3, 1.2);
+}
+.setting input[type="checkbox"]:checked {
+  background: linear-gradient(#3a9cff, #0a84ff); border-color: rgba(120,180,255,0.6);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.2), 0 0 12px rgba(10,132,255,0.35);
+}
+.setting input[type="checkbox"]:checked::before { transform: translateX(18px); }
+.setting input[type="checkbox"]:active::before { width: 24px; }
+.setting input[type="checkbox"]:checked:active::before { transform: translateX(14px); }
+.path-row { cursor: default; }
+.path-info { min-width: 0; flex: 1; }
+.path-label { color: rgba(255,255,255,0.8); }
+.path-value { color: rgba(255,255,255,0.45); font-size: 12px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path-choose {
+  background: rgba(255,255,255,0.1); color: #fff; border: none; border-radius: 6px;
+  padding: 7px 12px; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.path-choose:hover { background: rgba(255,255,255,0.18); }
+.select {
+  background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer;
+}
+.select:focus { outline: none; border-color: #0a84ff; }
+.settings-note { margin-top: 10px; color: rgba(255,255,255,0.35); font-size: 11px; line-height: 1.4; }
+.setting-col { flex-direction: column; align-items: stretch; gap: 8px; }
+.setting-hint { display: block; color: rgba(255,255,255,0.3); font-size: 11px; margin-top: 3px; }
+.text-input {
+  width: 100%; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px; color: #fff; font-size: 13px; padding: 8px 10px; box-sizing: border-box;
+}
+.text-input:focus { outline: none; border-color: #0a84ff; }
+.menu li.sub-action { color: rgba(255,255,255,0.55); font-style: italic; border-top: 1px solid rgba(255,255,255,0.06); }
+.menu li.sub-online { padding-left: 26px; }
+.modal-done {
+  margin-top: 18px; width: 100%; background: #0a84ff; color: #fff; border: none;
+  border-radius: 8px; padding: 11px; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.modal-done:hover { background: #329bff; }
+
+/* --- Плеер --- */
+#player { position: fixed; inset: 0; }
+.surface { width: 100%; height: 100%; background: #000; display: block; }
+
+.loader {
+  position: fixed; top: 50%; left: 50%; width: 54px; height: 54px;
+  margin: -27px 0 0 -27px; border: 4px solid rgba(255,255,255,0.2);
+  border-left-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; z-index: 5;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loader-text {
+  position: fixed; top: calc(50% + 40px); left: 0; right: 0; z-index: 5; text-align: center;
+  font-size: 13px; color: rgba(255,255,255,0.7); text-shadow: 0 1px 2px #000; pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Экран ошибки. */
+.error-overlay {
+  position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.85);
+}
+.error-box { text-align: center; max-width: 70%; }
+.error-message { color: rgba(255,255,255,0.85); font-size: 15px; line-height: 1.5; margin-bottom: 18px; }
+.error-actions { display: flex; gap: 12px; justify-content: center; }
+.error-back, .error-wait {
+  background: #0a84ff; color: #fff; border: none; border-radius: 8px; padding: 10px 22px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.error-back:hover { background: #329bff; }
+.error-wait { background: rgba(255,255,255,0.14); }
+.error-wait:hover { background: rgba(255,255,255,0.22); }
+
+/* Выше панели управления (z-index 10): текст можно перетащить в её область и
+   под неё; мышь ловит только сам текст. */
+.subtitles {
+  position: fixed; bottom: 120px; left: 8%; right: 8%; z-index: 12;
+  text-align: center; font-size: calc(1.4vw + 1.4vh); font-weight: 700; line-height: 1.4;
+  color: #fff; text-shadow: 0 0 4px #000, 2px 2px 3px #000, -2px 2px 3px #000;
+  pointer-events: none;
+}
+.subs-text { pointer-events: auto; cursor: move; display: inline-block; font-size: calc((1.4vw + 1.4vh) * var(--subs-scale, 1)); }
+.osd {
+  position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 9;
+  padding: 8px 16px; border-radius: 10px; background: rgba(20,20,22,0.85); color: #fff;
+  font-size: 14px; font-weight: 600; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+}
+.osd.show { opacity: 1; }
+.corner-link { pointer-events: auto; background: none; border: none; padding: 0; color: #0a84ff; font-size: 10pt; cursor: pointer; }
+.corner-link:hover { text-decoration: underline; }
+.menu li.chapter { color: rgba(255,255,255,0.7); font-variant-numeric: tabular-nums; }
+.menu li.chapter-first { border-top: 1px solid rgba(255,255,255,0.1); }
+.subs-status { font-size: 13px; font-weight: 400; font-style: italic; color: rgba(255,255,255,0.55); text-shadow: 0 1px 2px #000; }
+
+/* --- Контролы --- */
+.controls {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; padding-top: 60px;
+  background: linear-gradient(to top, rgba(0,0,0,0.75), transparent);
+  transition: opacity 0.2s ease; opacity: 1;
+}
+.controls.hidden-controls { opacity: 0; pointer-events: none; }
+
+.progress { position: relative; margin: 0 20px 4px; height: 16px; }
+/* Слои таймлайна лежат на одной линии: дорожка, загруженное, проигранное. */
+.progress .track, .buffered, .played {
+  position: absolute; left: 0; top: 6px; height: 4px; border-radius: 2px; pointer-events: none;
+}
+.progress .track { width: 100%; background: rgba(255,255,255,0.15); z-index: 1; }
+.buffered { width: 0; background: rgba(255,255,255,0.35); z-index: 2; }
+.played { width: 0; background: #0a84ff; z-index: 3; }
+/* Слайдер прозрачный поверх слоёв, виден только бегунок. */
+.seekbar {
+  -webkit-appearance: none; appearance: none; position: absolute; left: 0; top: 0;
+  width: 100%; height: 16px; margin: 0; background: none; cursor: pointer; z-index: 4;
+}
+.seekbar:focus { outline: none; }
+.seekbar::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%;
+  background: #fff; cursor: pointer; margin-top: 0;
+}
+.volumebar {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 4px; margin: 6px 0;
+  border-radius: 2px; background: rgba(255,255,255,0.15); cursor: pointer; position: relative; z-index: 2;
+}
+.volumebar::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%;
+  background: #fff; cursor: pointer;
+}
+
+.bar { display: flex; align-items: center; padding: 0 16px 12px; gap: 6px; }
+
+.icon-button {
+  background: none; border: none; padding: 6px; cursor: pointer; opacity: 0.85;
+  display: flex; align-items: center; justify-content: center;
+}
+.icon-button:hover { opacity: 1; }
+
+/* Иконки из src/renderer/icons: SVG 24x24 со штрихом, используются как маска
+   по альфа-каналу, цвет задаёт background. */
+.ico { display: block; width: 24px; height: 24px; background: #fff; -webkit-mask: var(--ico) center/contain no-repeat; }
+.ico-play { --ico: url("../icons/play.svg"); }
+.ico-pause { --ico: url("../icons/pause.svg"); }
+.ico-vol { --ico: url("../icons/volume.svg"); }
+.ico-vol.muted { --ico: url("../icons/volume-mute.svg"); }
+.ico-audio { --ico: url("../icons/audio.svg"); }
+.ico-gear { --ico: url("../icons/gear.svg"); }
+.ico-subs { --ico: url("../icons/subtitles.svg"); }
+.ico-fullscreen { --ico: url("../icons/fullscreen.svg"); }
+body.fullscreen .ico-fullscreen { --ico: url("../icons/fullscreen-exit.svg"); }
+.ico-playlist { --ico: url("../icons/playlist.svg"); }
+.ico-pin { --ico: url("../icons/pin.svg"); }
+.ico-prev { --ico: url("../icons/prev.svg"); }
+.ico-next { --ico: url("../icons/next.svg"); }
+.ico-info { --ico: url("../icons/info.svg"); }
+.ico-plus { --ico: url("../icons/plus.svg"); }
+.ico-download { --ico: url("../icons/download.svg"); }
+
+/* Правый верхний угол: статус закачки на паузе или при остановке потока и
+   заметка о полностью скачанном файле. Появляются и гаснут плавно. */
+.corner {
+  position: fixed; top: 14px; right: 16px; z-index: 8; text-align: right;
+  font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.75);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8); pointer-events: none; font-variant-numeric: tabular-nums;
+}
+.corner-line { opacity: 0; transition: opacity 0.25s; }
+.corner-line.show { opacity: 1; }
+.corner-note { font-size: 10pt; color: rgba(255,255,255,0.55); }
+.episode-button.hidden { display: none; }
+.speed-button {
+  background: rgba(255,255,255,0.12); border: none; color: rgba(255,255,255,0.9);
+  border-radius: 4px; font-size: 12px; font-weight: 600; padding: 5px 8px; cursor: pointer;
+  margin: 6px; min-width: 34px;
+}
+.speed-button:hover { background: rgba(255,255,255,0.2); }
+@media (max-width: 640px) { .speed-button { display: none; } }
+#pin.active .ico { background: #0a84ff; }
+#pin.active { opacity: 1; }
+
+.volume-group { position: relative; display: flex; align-items: center; }
+.volume-popup {
+  position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); z-index: 20;
+  width: 40px; height: 128px; display: flex; align-items: center; justify-content: center;
+  background: rgba(20,20,22,0.96); border-radius: 12px;
+  opacity: 0; pointer-events: none; transition: opacity 0.15s;
+}
+.volume-group:hover .volume-popup { opacity: 1; pointer-events: auto; }
+.volume-popup .volumebar { width: 104px; height: 6px; transform: rotate(-90deg); margin: 0; }
+.volume-popup .volumebar::-webkit-slider-thumb { width: 16px; height: 16px; }
+
+.time { font-size: 13px; color: rgba(255,255,255,0.85); white-space: nowrap; font-variant-numeric: tabular-nums; margin: 0 4px; }
+.title { flex: 1; min-width: 30px; font-size: 13px; color: rgba(255,255,255,0.5); overflow: hidden; margin-left: 6px; }
+.title-text { display: inline-block; white-space: nowrap; will-change: transform; }
+.spacer { flex: 1; }
+
+.dl-stats { font-size: 12px; color: rgba(255,255,255,0.72); white-space: nowrap; margin: 0 8px; font-variant-numeric: tabular-nums; }
+.dl-stats.hidden { display: none; }
+.dl-info.hidden { display: none; }
+
+@media (max-width: 560px) { .time, .volume-group { display: none; } }
+
+/* --- Меню дорожек и субтитров --- */
+.menu {
+  position: fixed; right: 16px; bottom: 64px; z-index: 20;
+  background: rgba(20,20,22,0.96); border-radius: 8px; min-width: 200px; max-height: 60%;
+  overflow-y: auto; padding: 6px 0;
+}
+.menu ul { list-style: none; margin: 0; padding: 0; }
+.menu li {
+  padding: 10px 16px; font-size: 13px; color: rgba(255,255,255,0.75); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.menu li:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.menu li.active { color: #fff; font-weight: 600; }
+
+/* --- Оверлей перетаскивания --- */
+#drop-overlay {
+  position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+  background: rgba(10,132,255,0.15); border: 3px dashed rgba(255,255,255,0.5);
+  font-size: 22px; font-weight: 600; color: #fff;
+}

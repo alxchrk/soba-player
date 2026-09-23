@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; media-src 'self' http://127.0.0.1:*; connect-src http://127.0.0.1:*; style-src 'self' 'unsafe-inline';">
+  <link rel="stylesheet" href="styles/app.css">
+</head>
+<body>
+
+  <div class="titlebar-drag"></div>
+
+  <div id="home">
+    <button class="gear-button no-drag" id="open-settings" data-i18n-title="settings"><span class="ico ico-gear"></span></button>
+    <div class="home-inner">
+      <button class="open-button" id="open-file" data-i18n="openFile"></button>
+      <div class="continue hidden" id="continue"></div>
+      <div class="open-hint" data-i18n="dropHint"></div>
+      <div class="default-offer hidden" id="default-offer">
+        <span data-i18n="offerDefault"></span>
+        <button class="offer-yes" id="make-default" data-i18n="offerYes"></button>
+        <button class="offer-no" id="dismiss-default" data-i18n="offerNo"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="settings">
+    <div class="modal-card no-drag">
+      <div class="modal-title" data-i18n="settings"></div>
+      <div class="settings-grid">
+        <div class="settings-col">
+          <label class="setting">
+            <span data-i18n="setDefault"></span>
+            <input type="checkbox" id="set-default">
+          </label>
+          <label class="setting">
+            <span data-i18n="setPrefetch"></span>
+            <input type="checkbox" id="set-prefetch">
+          </label>
+          <label class="setting">
+            <span data-i18n="setAllDesktops"></span>
+            <input type="checkbox" id="set-all-desktops">
+          </label>
+          <label class="setting">
+            <span data-i18n="setRememberWindow"></span>
+            <input type="checkbox" id="set-remember-window">
+          </label>
+          <label class="setting">
+            <span data-i18n="setAskPath"></span>
+            <input type="checkbox" id="set-ask-path">
+          </label>
+          <div class="setting path-row">
+            <span data-i18n="language"></span>
+            <select class="select" id="set-lang">
+              <option value="en">English</option>
+              <option value="ru">Русский</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-col">
+          <div class="setting path-row" id="path-row">
+            <div class="path-info">
+              <div class="path-label" data-i18n="whereToDownload"></div>
+              <div class="path-value" id="path-value"></div>
+            </div>
+            <button class="path-choose" id="choose-path" data-i18n="choose"></button>
+          </div>
+          <div class="settings-note" data-i18n="cacheNote"></div>
+          <div class="setting setting-col">
+            <span><span data-i18n="osKey"></span> <span class="setting-hint"><span data-i18n="osKeyHint"></span> <button class="link-button" id="os-help-toggle" data-i18n="osHowTo"></button></span></span>
+            <div class="os-help hidden" id="os-help">
+              <ol>
+                <li data-i18n="osStep1"></li>
+                <li data-i18n="osStep2"></li>
+                <li data-i18n="osStep3"></li>
+              </ol>
+              <button class="path-choose" data-url="https://www.opensubtitles.com/en/consumers" data-i18n="osOpenSite"></button>
+            </div>
+            <input type="text" id="os-key" class="text-input" data-i18n-placeholder="optional" spellcheck="false">
+          </div>
+          <div class="about">
+            <img class="about-icon" src="icons/app.png" alt="">
+            <div class="about-name">Soba Player</div>
+            <div class="about-author" data-i18n="byAuthor"></div>
+            <div class="about-links">
+              <button class="about-link" data-url="https://t.me/alxchrk">Telegram</button>
+              <button class="about-link" data-url="https://github.com/alxchrk">GitHub</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <button class="modal-done" id="close-settings" data-i18n="done"></button>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="shortcuts">
+    <div class="modal-card modal-card-narrow no-drag">
+      <div class="modal-title" data-i18n="shortcuts"></div>
+      <div class="keys-grid">
+        <div class="keys-key"><kbd>Space</kbd> <kbd>K</kbd></div><div data-i18n="keyPlayPause"></div>
+        <div class="keys-key"><kbd>←</kbd> <kbd>→</kbd></div><div data-i18n="keySeek10"></div>
+        <div class="keys-key"><kbd>J</kbd> <kbd>L</kbd></div><div data-i18n="keySeek30"></div>
+        <div class="keys-key"><kbd>↑</kbd> <kbd>↓</kbd></div><div data-i18n="keyVolume"></div>
+        <div class="keys-key"><kbd>M</kbd></div><div data-i18n="keyMute"></div>
+        <div class="keys-key"><kbd>+</kbd> <kbd>−</kbd></div><div data-i18n="keySubsSize"></div>
+        <div class="keys-key"><kbd>F</kbd></div><div data-i18n="keyFullscreen"></div>
+        <div class="keys-key"><kbd>Esc</kbd></div><div data-i18n="keyExitFullscreen"></div>
+        <div class="keys-key"><kbd>⌘</kbd> <kbd>O</kbd></div><div data-i18n="keyOpen"></div>
+        <div class="keys-key"><kbd>⌘</kbd> <kbd>,</kbd></div><div data-i18n="keySettings"></div>
+        <div class="keys-key"><kbd>⌘</kbd> <kbd>/</kbd></div><div data-i18n="shortcuts"></div>
+      </div>
+      <button class="modal-done" id="close-shortcuts" data-i18n="done"></button>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="about-modal">
+    <div class="modal-card modal-card-narrow no-drag about-card">
+      <img class="about-card-icon" src="icons/app.png" alt="">
+      <div class="about-card-name">Soba Player</div>
+      <div class="about-card-version" id="about-version"></div>
+      <div class="about-card-desc" data-i18n="aboutDesc"></div>
+      <div class="about-card-author" data-i18n="byAuthor"></div>
+      <div class="about-links about-card-links">
+        <button class="about-link" data-url="https://t.me/alxchrk">Telegram</button>
+        <button class="about-link" data-url="https://github.com/alxchrk">GitHub</button>
+      </div>
+      <button class="modal-done" id="close-about" data-i18n="done"></button>
+    </div>
+  </div>
+
+  <div id="player" class="hidden">
+    <video id="video" class="surface" crossorigin="anonymous"></video>
+    <div id="osd" class="osd"></div>
+
+    <div id="loader" class="loader hidden"></div>
+    <div id="loader-text" class="loader-text hidden"></div>
+    <div class="corner">
+      <div class="corner-line" id="corner-dl"></div>
+      <div class="corner-line corner-note" id="corner-note"></div>
+    </div>
+    <div id="subtitles" class="subtitles"></div>
+
+    <div id="error-overlay" class="error-overlay hidden">
+      <div class="error-box">
+        <div class="error-message" id="error-message"></div>
+        <div class="error-actions">
+          <button class="error-wait hidden" id="error-wait" data-i18n="keepWaiting"></button>
+          <button class="error-back" id="error-back" data-i18n="openAnother"></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="controls" class="controls">
+      <div class="progress" id="progress">
+        <div class="track"></div>
+        <div class="buffered" id="buffered"></div>
+        <div class="played" id="played"></div>
+        <input class="seekbar" id="seekbar" type="range" min="0" max="1000" value="0">
+      </div>
+      <div class="bar">
+        <button class="icon-button" id="play-pause" data-state="pause">
+          <span class="ico ico-pause"></span>
+        </button>
+
+        <div class="volume-group" id="volume-group">
+          <div class="volume-popup">
+            <input class="volumebar" id="volumebar" type="range" min="0" max="200" value="100">
+          </div>
+          <button class="icon-button" id="mute"><span class="ico ico-vol"></span></button>
+        </div>
+
+        <div class="time" id="time">0:00 / 0:00</div>
+
+        <div class="title" id="title"><span class="title-text" id="title-text"></span></div>
+        <div class="dl-stats hidden" id="dl-stats"></div>
+        <button class="icon-button dl-info hidden" id="dl-info" data-i18n-title="downloadStatus">
+          <span class="ico ico-info"></span>
+        </button>
+        <button class="icon-button hidden" id="save-file" data-i18n-title="saveFile">
+          <span class="ico ico-download"></span>
+        </button>
+
+        <button class="icon-button episode-button hidden" id="prev-episode" data-i18n-title="prevEpisode">
+          <span class="ico ico-prev"></span>
+        </button>
+        <button class="icon-button episode-button hidden" id="next-episode" data-i18n-title="nextEpisode">
+          <span class="ico ico-next"></span>
+        </button>
+        <button class="icon-button menu-button hidden" id="playlist-button" data-menu="playlist-menu">
+          <span class="ico ico-playlist"></span>
+        </button>
+        <button class="speed-button menu-button" id="speed-button" data-menu="speed-menu">
+          <span id="speed-label">1x</span>
+        </button>
+        <button class="icon-button menu-button hidden" id="audio-button" data-menu="audio-menu">
+          <span class="ico ico-audio"></span>
+        </button>
+        <button class="icon-button menu-button hidden" id="subs-button" data-menu="subs-menu">
+          <span class="ico ico-subs"></span>
+        </button>
+        <button class="icon-button" id="open-more" data-i18n-title="openMore">
+          <span class="ico ico-plus"></span>
+        </button>
+        <button class="icon-button" id="pin" data-i18n-title="keepOnTop">
+          <span class="ico ico-pin"></span>
+        </button>
+        <button class="icon-button" id="fullscreen">
+          <span class="ico ico-fullscreen"></span>
+        </button>
+      </div>
+    </div>
+
+    <div class="menu hidden" id="playlist-menu"><ul></ul></div>
+    <div class="menu hidden" id="speed-menu"><ul></ul></div>
+    <div class="menu hidden" id="audio-menu"><ul></ul></div>
+    <div class="menu hidden" id="subs-menu"><ul></ul></div>
+  </div>
+
+  <div id="drop-overlay" class="hidden"><div data-i18n="dropToOpen"></div></div>
+
+  <script src="i18n.js"></script>
+  <script src="surface.js"></script>
+  <script src="player.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

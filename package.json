@@ -1,0 +1,121 @@
+{
+  "name": "soba-player",
+  "version": "0.1.0",
+  "productName": "Soba Player",
+  "description": "Minimal torrent streaming player for macOS",
+  "author": "alxchrk (https://github.com/alxchrk)",
+  "license": "MIT",
+  "homepage": "https://github.com/alxchrk/soba-player",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alxchrk/soba-player.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alxchrk/soba-player/issues"
+  },
+  "private": true,
+  "main": "src/main/main.js",
+  "scripts": {
+    "ffmpeg": "sh build/ffmpeg/build.sh",
+    "dev": "electron .",
+    "start": "electron .",
+    "build": "sh build/ffmpeg/build.sh && sh -c 'set -a; [ -f .env ] && . ./.env; set +a; electron-builder --mac dir --arm64'",
+    "dist": "sh build/ffmpeg/build.sh && sh -c 'set -a; [ -f .env ] && . ./.env; set +a; electron-builder --mac dmg zip --arm64'",
+    "release": "sh build/ffmpeg/build.sh && sh -c 'set -a; [ -f .env ] && . ./.env; set +a; electron-builder --mac dmg zip --arm64 --publish always'"
+  },
+  "build": {
+    "appId": "ru.sobaplayer.app",
+    "productName": "Soba Player",
+    "copyright": "© 2026 alxchrk",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/ffmpeg/bin",
+        "to": "ffmpeg",
+        "filter": [
+          "ffmpeg",
+          "ffprobe"
+        ]
+      },
+      {
+        "from": "build/licenses",
+        "to": "licenses"
+      },
+      {
+        "from": "LICENSE",
+        "to": "licenses/LICENSE-Soba-Player.txt"
+      }
+    ],
+    "npmRebuild": false,
+    "afterPack": "build/after-pack.js",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "alxchrk",
+        "repo": "soba-player"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dir"
+      ],
+      "icon": "build/icon.icns",
+      "notarize": true,
+      "category": "public.app-category.video",
+      "extendInfo": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "Magnet link",
+            "CFBundleURLSchemes": [
+              "magnet"
+            ]
+          }
+        ],
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "BitTorrent document",
+            "CFBundleTypeExtensions": [
+              "torrent"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "Video",
+            "CFBundleTypeExtensions": [
+              "mp4",
+              "m4v",
+              "mkv",
+              "avi",
+              "mov",
+              "webm",
+              "ts",
+              "wmv",
+              "flv"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          }
+        ]
+      }
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "webtorrent": "^2.5.1"
+  },
+  "overrides": {
+    "uint8-util": "2.2.6"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^26.15.3"
+  }
+}

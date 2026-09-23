@@ -1,0 +1,266 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "linear-gradient": [
+          "srgb:0.12549,0.61961,1.00000,1.00000",
+          "srgb:0.00000,0.45098,0.93725,1.00000"
+        ]
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "linear-gradient": [
+          "srgb:0.12549,0.29804,0.49412,1.00000",
+          "srgb:0.02353,0.09804,0.18039,1.00000"
+        ]
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "01 · Transformation line",
+      "lighting": "individual",
+      "blur-material": 0.7,
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.16
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      },
+      "layers": [
+        {
+          "name": "Timeline",
+          "image-name": "Timeline.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 · Hanging soba",
+      "lighting": "individual",
+      "blur-material": 0.7,
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.18
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      },
+      "layers": [
+        {
+          "name": "01-Noodle",
+          "image-name": "01-Noodle.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "02-Noodle",
+          "image-name": "02-Noodle.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "03-Noodle",
+          "image-name": "03-Noodle.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "04-Noodle",
+          "image-name": "04-Noodle.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "05-Noodle",
+          "image-name": "05-Noodle.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "06-Noodle",
+          "image-name": "06-Noodle.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "07-Noodle",
+          "image-name": "07-Noodle.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 · Chopsticks",
+      "lighting": "individual",
+      "blur-material": 0.7,
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.18
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.52
+      },
+      "layers": [
+        {
+          "name": "Upper chopstick",
+          "image-name": "Upper chopstick.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lower chopstick",
+          "image-name": "Lower chopstick.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 · Media file — lower half",
+      "lighting": "individual",
+      "blur-material": 0.7,
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.2
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.66
+      },
+      "layers": [
+        {
+          "name": "Media file with Play aperture",
+          "image-name": "Media file with Play aperture.svg",
+          "glass": true,
+          "fill": {
+            "solid": "srgb:0.95686,0.98039,1.00000,1.00000"
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.89412,0.94118,1.00000,1.00000"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}
