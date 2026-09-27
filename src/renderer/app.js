@@ -114,6 +114,7 @@ let openGen = 0;
 let opening = false;
 
 async function openSource(source) {
+  savePosition();
   const gen = ++openGen;
   opening = true;
   try {
@@ -133,6 +134,7 @@ async function openSourceInner(source, gen) {
   } else {
     savePath = localStorage.getItem('downloadPath') || null;
   }
+  player.stop();
   document.getElementById('error-overlay').classList.add('hidden');
   document.getElementById('loader').classList.remove('hidden');
   let info;
@@ -283,6 +285,10 @@ function maybePrefetchNext() {
 }
 
 setInterval(() => {
+  // Позиция нужна main для авторежима скорости, в том числе на паузе.
+  if (currentInfo && episodes.length && !opening) {
+    window.api.playbackPos(episodes[currentListPos].index, player.surface.currentTime, currentDur);
+  }
   if (!currentInfo || player.surface.paused) return;
   savePosition();
   maybePrefetchNext();
@@ -401,7 +407,7 @@ setInterval(async () => {
     const st = await window.api.torrentStats();
     hasStats = !!st;
     if (st) {
-      const text = `${st.peers} ${t('peers')} · ${fmtSpeed(st.downloadSpeed)} · ${Math.round(st.progress * 100)}%`;
+      const text = `${st.peers} ${t('peers')} · ${fmtSpeed(st.downloadSpeed)}${st.limited ? ' ' + t('speedLimited') : ''} · ${Math.round(st.progress * 100)}%`;
       dlStats.textContent = text;
       cornerDl.textContent = text;
       applyDlVisibility(true);
@@ -555,6 +561,52 @@ setDefault.addEventListener('change', async () => {
   if (setDefault.checked) await window.api.makeDefaultHandler();
   else await window.api.removeDefaultHandler();
   localStorage.setItem('defaultOfferDismissed', '1');
+});
+// Ограниченный кэш: тумблер и размер в ГБ (ползунок и поле синхронны).
+// Хранится одним ключом: '0' выключен, иначе размер; main получает его при
+// старте и при каждой смене.
+const CACHE_DEFAULT_GB = 10;
+const setCache = document.getElementById('set-cache');
+const cacheRow = document.getElementById('cache-size-row');
+const cacheSlider = document.getElementById('set-cache-slider');
+const cacheGb = document.getElementById('set-cache-gb');
+function cacheSize() {
+  return parseFloat(localStorage.getItem('cacheSizeGb')) || CACHE_DEFAULT_GB;
+}
+function renderCache() {
+  const on = localStorage.getItem('cacheLimit') === '1';
+  const gb = cacheSize();
+  setCache.checked = on;
+  cacheRow.classList.toggle('hidden', !on);
+  cacheSlider.value = Math.min(gb, Number(cacheSlider.max));
+  cacheGb.value = gb;
+  const pct = ((cacheSlider.value - cacheSlider.min) / (cacheSlider.max - cacheSlider.min)) * 100;
+  cacheSlider.style.background = `linear-gradient(to right, #ddd ${pct}%, rgba(255,255,255,0.2) ${pct}%)`;
+  window.api.setCacheLimit(on ? gb : 0);
+}
+function setCacheSize(gb) {
+  gb = Math.round(Math.max(Number(cacheGb.min), Math.min(Number(cacheGb.max), gb)));
+  if (!Number.isFinite(gb)) return renderCache();
+  localStorage.setItem('cacheSizeGb', String(gb));
+  renderCache();
+}
+setCache.addEventListener('change', () => {
+  localStorage.setItem('cacheLimit', setCache.checked ? '1' : '0');
+  renderCache();
+});
+cacheSlider.addEventListener('input', () => setCacheSize(Number(cacheSlider.value)));
+cacheGb.addEventListener('change', () => setCacheSize(parseFloat(cacheGb.value)));
+renderCache();
+
+// Ограничение скорости загрузки: хранится в окне, main получает его при
+// старте и при каждой смене.
+const setSpeed = document.getElementById('set-speed');
+setSpeed.value = localStorage.getItem('speedLimit') || 'auto';
+if (!setSpeed.value) setSpeed.value = 'auto';
+window.api.setSpeedLimit(setSpeed.value);
+setSpeed.addEventListener('change', () => {
+  localStorage.setItem('speedLimit', setSpeed.value);
+  window.api.setSpeedLimit(setSpeed.value);
 });
 setPrefetch.addEventListener('change', () => {
   localStorage.setItem('prefetchNext', setPrefetch.checked ? '1' : '0');

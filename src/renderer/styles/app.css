@@ -147,6 +147,9 @@ body.modal-open .bar, body.modal-open .titlebar-drag { -webkit-app-region: no-dr
   border-radius: 6px; color: #fff; font-size: 13px; padding: 8px 10px; box-sizing: border-box;
 }
 .text-input:focus { outline: none; border-color: #0a84ff; }
+.cache-size { gap: 12px; border-top: none; padding-top: 0; }
+.cache-slider { flex: 1; }
+.cache-gb { width: 72px; flex: none; text-align: right; padding: 6px 8px; }
 .menu li.sub-action { color: rgba(255,255,255,0.55); font-style: italic; border-top: 1px solid rgba(255,255,255,0.06); }
 .menu li.sub-online { padding-left: 26px; }
 .modal-done {
@@ -265,6 +268,7 @@ body.modal-open .bar, body.modal-open .titlebar-drag { -webkit-app-region: no-dr
 body.fullscreen .ico-fullscreen { --ico: url("../icons/fullscreen-exit.svg"); }
 .ico-playlist { --ico: url("../icons/playlist.svg"); }
 .ico-pin { --ico: url("../icons/pin.svg"); }
+.ico-airplay { --ico: url("../icons/airplay.svg"); }
 .ico-prev { --ico: url("../icons/prev.svg"); }
 .ico-next { --ico: url("../icons/next.svg"); }
 .ico-info { --ico: url("../icons/info.svg"); }
@@ -290,6 +294,7 @@ body.fullscreen .ico-fullscreen { --ico: url("../icons/fullscreen-exit.svg"); }
 .speed-button:hover { background: rgba(255,255,255,0.2); }
 @media (max-width: 640px) { .speed-button { display: none; } }
 #pin.active .ico { background: #0a84ff; }
+#airplay.active .ico { background: #0a84ff; }
 #pin.active { opacity: 1; }
 
 .volume-group { position: relative; display: flex; align-items: center; }
@@ -334,3 +339,12 @@ body.fullscreen .ico-fullscreen { --ico: url("../icons/fullscreen-exit.svg"); }
   background: rgba(10,132,255,0.15); border: 3px dashed rgba(255,255,255,0.5);
   font-size: 22px; font-weight: 600; color: #fff;
 }
+
+/* Показ на телевизоре: локальный кадр скрыт, по центру надпись. */
+.tv-overlay { display: none; }
+#player.tv-mode #video { visibility: hidden; }
+#player.tv-mode .tv-overlay {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; color: rgba(255,255,255,0.8); font-size: 15px; pointer-events: none;
+}
+.tv-overlay .ico { width: 56px; height: 56px; background: rgba(255,255,255,0.8); }

@@ -11,6 +11,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { ffmpegPath, ffprobePath } = require('./ffmpeg');
+const WindowStore = require('./window-store');
 
 // Кодеки, которые Chromium на macOS воспроизводит нативно.
 const NATIVE_VIDEO = new Set(['h264', 'hevc', 'vp8', 'vp9', 'av1']);
@@ -51,7 +52,127 @@ async function ensureClient() {
   // utp: false, потому что нативный utp-native под Electron роняет главный
   // процесс (SIGSEGV в utp_process_udp); DHT и TCP-пиры работают без него.
   client = new WebTorrent({ maxConns: 100, utp: false });
+  applyLimit();
   return client;
+}
+
+// --- ограничение скорости загрузки ------------------------------------------
+// Ручной режим: постоянный потолок в МБ/с (0 = без ограничения). Авторежим
+// смотрит на запас, скачанный подряд от позиции просмотра: меньше
+// AUTO_FULL_SEC полная скорость (быстрый старт и перемотка), до
+// AUTO_DOUBLE_SEC два битрейта файла, дальше один битрейт, то есть запас
+// держится, но не растёт и не забивает роутер. Потолок не ниже AUTO_MIN_RATE,
+// чтобы у лёгкого файла не душить куски, которые плеер читает прямо сейчас.
+const AUTO_FULL_SEC = 600;
+const AUTO_DOUBLE_SEC = 1800;
+const AUTO_MIN_RATE = 1e6;
+// tier: множитель битрейта для потолка (0 = без потолка).
+const speed = { mode: 'auto', tier: 0, pos: null, timer: null };
+
+// Ограничитель движка принимает только целое число байт в секунду больше
+// нуля и бросает исключение на дробном: округление здесь, для всех режимов.
+function setDownloadRate(rate) {
+  if (client) client.throttleDownload(rate > 0 ? Math.max(1, Math.round(rate)) : -1);
+}
+
+function applyLimit() {
+  clearInterval(speed.timer);
+  speed.timer = null;
+  if (speed.mode === 'auto') {
+    speed.tier = 0;
+    setDownloadRate(0);
+    speed.timer = setInterval(autoLimitTick, 2000);
+  } else {
+    setDownloadRate((parseFloat(speed.mode) || 0) * 1e6);
+  }
+}
+
+// mode: 'auto' или число МБ/с строкой ('0' = без ограничения).
+function setSpeedLimit(mode) {
+  speed.mode = mode === 'auto' ? 'auto' : String(parseFloat(mode) || 0);
+  applyLimit();
+}
+
+// Позиция просмотра от окна: номер файла, секунда и длительность.
+function setPlaybackPos(index, sec, durationSec) {
+  speed.pos = { index, sec, durationSec };
+}
+
+// Сколько секунд видео скачано подряд от позиции просмотра.
+function aheadSeconds() {
+  const t = state.torrent;
+  const p = speed.pos;
+  if (!t || !t.bitfield || !p || !p.durationSec) return null;
+  const file = t.files[p.index];
+  if (!file || file.offset == null) return null;
+  const bytesPerSec = file.length / p.durationSec;
+  const from = file.offset + Math.min(file.length, Math.max(0, p.sec) * bytesPerSec);
+  const fileEnd = file.offset + file.length - 1;
+  let piece = Math.floor(from / t.pieceLength);
+  const lastPiece = Math.floor(fileEnd / t.pieceLength);
+  while (piece <= lastPiece && t.bitfield.get(piece)) piece++;
+  const aheadBytes = Math.min(piece * t.pieceLength, fileEnd + 1) - from;
+  return { sec: Math.max(0, aheadBytes) / bytesPerSec, bytesPerSec };
+}
+
+function autoLimitTick() {
+  const a = aheadSeconds();
+  const tier = !a || a.sec < AUTO_FULL_SEC ? 0 : a.sec < AUTO_DOUBLE_SEC ? 2 : 1;
+  if (tier === speed.tier) return;
+  speed.tier = tier;
+  setDownloadRate(tier ? Math.max(AUTO_MIN_RATE, tier * a.bytesPerSec) : 0);
+}
+
+// --- ограниченный кэш -------------------------------------------------------
+// При включённом кэше куски раздачи лежат в WindowStore отдельными файлами.
+// Качается окно от позиции просмотра размером с кэш за вычетом запаса
+// позади, поэтому файл меньше кэша скачивается целиком и не вытесняется.
+// Когда на диске больше лимита, удаляются куски позади позиции (дальние
+// первыми), потом куски за окном. KEEP_BEHIND_SEC позади остаются для
+// короткой перемотки назад; дальняя перемотка назад докачивает заново.
+const KEEP_BEHIND_SEC = 120;
+const cache = { bytes: 0, store: null, index: null, window: null, prefetch: null, timer: null };
+
+// gb: размер кэша в ГБ, 0 = выключен. Действует на следующую открытую раздачу;
+// у текущей раздачи в режиме кэша меняется только лимит.
+function setCacheLimit(gb) {
+  cache.bytes = Math.max(0, parseFloat(gb) || 0) * 1e9;
+}
+
+function cacheTick() {
+  const t = state.torrent;
+  const store = cache.store;
+  if (!t || t.destroyed || !store || !t.pieces || cache.index == null) return;
+  const file = t.files[cache.index];
+  if (!file) return;
+  const p = speed.pos && speed.pos.index === cache.index ? speed.pos : null;
+  const bps = p && p.durationSec ? file.length / p.durationSec : 0;
+  const pl = t.pieceLength;
+  const posByte = file.offset + Math.min(file.length - 1, Math.max(0, p ? p.sec * bps : 0));
+  const posPiece = Math.floor(posByte / pl);
+  const behindBytes = bps * KEEP_BEHIND_SEC;
+  const limit = cache.bytes || store.bytes + pl;
+  const windowBytes = Math.max(pl * 4, limit - behindBytes - pl * 4);
+  const endPiece = Math.min(file._endPiece, Math.floor((posByte + windowBytes) / pl));
+
+  if (!cache.window || cache.window[0] !== posPiece || cache.window[1] !== endPiece) {
+    try {
+      t.deselect(0, t.pieces.length - 1);
+      t.select(posPiece, endPiece, 0);
+      if (cache.prefetch) t.select(cache.prefetch[0], cache.prefetch[1], 0);
+      cache.window = [posPiece, endPiece];
+    } catch (_) {}
+  }
+
+  if (!cache.bytes || store.bytes <= cache.bytes) return;
+  const keepFrom = Math.floor(Math.max(file.offset, posByte - behindBytes) / pl);
+  const score = (i) => (i < keepFrom ? 1e12 + (keepFrom - i) : i - endPiece);
+  const victims = store.indexes().filter((i) => i < keepFrom || i > endPiece).sort((a, b) => score(b) - score(a));
+  for (const i of victims) {
+    if (store.bytes <= cache.bytes * 0.95) break;
+    store.evict(i);
+    t._markUnverified(i);
+  }
 }
 
 function killTranscoder() {
@@ -63,6 +184,9 @@ function killTranscoder() {
 
 async function destroyCurrent() {
   killTranscoder();
+  speed.pos = null;
+  clearInterval(cache.timer);
+  Object.assign(cache, { store: null, index: null, window: null, prefetch: null, timer: null });
   if (state.server) {
     try { state.server.close(); } catch (_) {}
     state.server = null;
@@ -213,7 +337,8 @@ function serveSubs(req, res, index, query) {
 // Полное извлечение дорожки в кэш из локального файла (когда он скачан целиком).
 function cacheSubtitles(index, track) {
   const cached = subsCachePath(index, track);
-  const src = filePath(index);
+  // В режиме кэша целого файла на диске нет, ffmpeg читает его через сервер.
+  const src = filePath(index) || (cache.store ? rawUrl(index) : null);
   if (!cached || !src || fs.existsSync(cached) || fs.existsSync(cached + '.part')) return Promise.resolve(false);
   return new Promise((resolve) => {
     const out = fs.createWriteStream(cached + '.part');
@@ -300,7 +425,7 @@ function summarizeProbe(raw) {
   return {
     durationSec: parseFloat(raw.format && raw.format.duration) || null,
     formatName: (raw.format && raw.format.format_name) || '',
-    video: v ? { codec: v.codec_name, width: v.width, height: v.height } : null,
+    video: v ? { codec: v.codec_name, width: v.width, height: v.height, pixFmt: v.pix_fmt || '' } : null,
     audioTracks,
     subtitleTracks,
     chapters,
@@ -374,8 +499,21 @@ async function addTorrent(source, tmpDir) {
   await destroyCurrent();
   state.probeCache = {};
   const torrentId = normalizeSource(source);
+  // Режим кэша: куски в WindowStore в скрытой папке, выбор кусков ведёт
+  // cacheTick (deselect: движок сам ничего не выбирает).
+  const addOpts = { path: tmpDir, announce: PUBLIC_TRACKERS };
+  let cacheDir = null;
+  if (cache.bytes > 0) {
+    cacheDir = path.join(tmpDir, '.soba-cache-' + Date.now().toString(36));
+    Object.assign(addOpts, {
+      store: WindowStore,
+      storeCacheSlots: 0,
+      deselect: true,
+      storeOpts: { soba: { dir: cacheDir, onCreate: (s) => { cache.store = s; } } },
+    });
+  }
   return new Promise((resolve, reject) => {
-    const torrent = client.add(torrentId, { path: tmpDir, announce: PUBLIC_TRACKERS });
+    const torrent = client.add(torrentId, addOpts);
     torrent.on('error', reject);
     // Папка раздачи, существовавшая до нас (например, та же раздача уже лежит в
     // выбранной папке), не должна попасть под удаление при выходе: имя раздачи
@@ -390,8 +528,9 @@ async function addTorrent(source, tmpDir) {
       const files = torrent.files.map((f, i) => ({
         index: i, name: f.name, length: f.length, video: isVideo(f.name),
       }));
-      console.log('[torrent] ready:', torrent.name, '| files:', files.length, '| port:', state.port);
-      resolve({ name: torrent.name, infoHash: torrent.infoHash, files, preexisting });
+      if (cache.store) cache.timer = setInterval(cacheTick, 2000);
+      console.log('[torrent] ready:', torrent.name, '| files:', files.length, '| port:', state.port, '| cache:', cache.store ? cache.bytes / 1e9 + ' GB' : 'off');
+      resolve({ name: torrent.name, infoHash: torrent.infoHash, files, preexisting, cacheDir });
     });
   });
 }
@@ -402,6 +541,13 @@ async function addTorrent(source, tmpDir) {
 function selectOnly(index) {
   const t = state.torrent;
   if (!t || typeof t.deselect !== 'function' || !t.pieces) return;
+  if (cache.store) {
+    cache.index = index;
+    cache.window = null;
+    cache.prefetch = null;
+    cacheTick();
+    return;
+  }
   try {
     t.deselect(0, t.pieces.length - 1, 0);
     t.files.forEach((f, i) => (i === index ? f.select() : f.deselect()));
@@ -417,6 +563,7 @@ function prefetchBytes(index, bytes) {
   if (!file || file.offset == null) return;
   const start = Math.floor(file.offset / t.pieceLength);
   const end = Math.floor((file.offset + Math.min(bytes, file.length)) / t.pieceLength);
+  if (cache.store) cache.prefetch = [start, end];
   try { t.select(start, end, 0); } catch (_) {}
 }
 
@@ -435,7 +582,10 @@ async function prepare(index) {
 function stats() {
   const t = state.torrent;
   if (!t || typeof t.numPeers !== 'number') return null;
-  return { peers: t.numPeers, downloadSpeed: t.downloadSpeed || 0, progress: t.progress || 0, downloaded: t.downloaded || 0 };
+  return {
+    peers: t.numPeers, downloadSpeed: t.downloadSpeed || 0, progress: t.progress || 0, downloaded: t.downloaded || 0,
+    limited: speed.mode === 'auto' ? speed.tier > 0 : parseFloat(speed.mode) > 0,
+  };
 }
 
 // Доля скачанного для файла (0..1). Для локального файла всегда 1.
@@ -450,9 +600,18 @@ function fileProgress(index) {
 // Путь к файлу на диске: в папке раздачи или сам локальный файл.
 function filePath(index) {
   const file = fileByIndex(index);
-  if (!file || !file.path) return null;
+  if (!file || !file.path || cache.store) return null;
   if (path.isAbsolute(file.path)) return file.path;
   return path.join(state.torrent.path, file.path);
+}
+
+// Копия файла в dest: с диска, а в режиме кэша через движок по кускам.
+async function copyFileTo(index, dest) {
+  const src = filePath(index);
+  if (src) return fs.promises.copyFile(src, dest);
+  const file = fileByIndex(index);
+  if (!file) throw new Error('no file');
+  await require('stream/promises').pipeline(file.createReadStream(), fs.createWriteStream(dest));
 }
 
 // Реальное начало потока при seek с копированием видео: ffmpeg стартует с
@@ -512,5 +671,6 @@ function externalSubs(filePath) {
 
 module.exports = {
   addTorrent, prepare, playUrl, subsUrl, externalSubs, prefetchBytes, fileProgress, filePath, stats,
-  destroyCurrent, setSubsCacheDir, cacheSubtitles,
+  destroyCurrent, setSubsCacheDir, cacheSubtitles, setSpeedLimit, setPlaybackPos, setCacheLimit,
+  rawUrl, seekStart, fileByIndex, copyFileTo, probeOf: (index) => state.probeCache && state.probeCache[index],
 };

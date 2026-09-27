@@ -65,6 +65,26 @@
             <button class="path-choose" id="choose-path" data-i18n="choose"></button>
           </div>
           <div class="settings-note" data-i18n="cacheNote"></div>
+          <label class="setting">
+            <span><span data-i18n="cacheLimit"></span> <span class="setting-hint" data-i18n="cacheLimitHint"></span></span>
+            <input type="checkbox" id="set-cache">
+          </label>
+          <div class="setting path-row cache-size hidden" id="cache-size-row">
+            <input class="volumebar cache-slider" id="set-cache-slider" type="range" min="2" max="200" step="1">
+            <input class="text-input cache-gb" id="set-cache-gb" type="number" min="1" max="2000" step="1">
+            <span data-i18n="gb"></span>
+          </div>
+          <div class="setting path-row">
+            <span data-i18n="speedLimit"></span>
+            <select class="select" id="set-speed">
+              <option value="auto" data-i18n="speedAuto"></option>
+              <option value="0" data-i18n="speedUnlimited"></option>
+              <option value="30">30 MB/s</option>
+              <option value="15">15 MB/s</option>
+              <option value="10">10 MB/s</option>
+              <option value="5">5 MB/s</option>
+            </select>
+          </div>
           <div class="setting setting-col">
             <span><span data-i18n="osKey"></span> <span class="setting-hint"><span data-i18n="osKeyHint"></span> <button class="link-button" id="os-help-toggle" data-i18n="osHowTo"></button></span></span>
             <div class="os-help hidden" id="os-help">
@@ -138,6 +158,10 @@
       <div class="corner-line corner-note" id="corner-note"></div>
     </div>
     <div id="subtitles" class="subtitles"></div>
+    <div id="tv-overlay" class="tv-overlay">
+      <span class="ico ico-airplay"></span>
+      <div data-i18n="playingOnTv"></div>
+    </div>
 
     <div id="error-overlay" class="error-overlay hidden">
       <div class="error-box">
@@ -199,6 +223,9 @@
         </button>
         <button class="icon-button" id="open-more" data-i18n-title="openMore">
           <span class="ico ico-plus"></span>
+        </button>
+        <button class="icon-button hidden" id="airplay" data-i18n-title="airplay">
+          <span class="ico ico-airplay"></span>
         </button>
         <button class="icon-button" id="pin" data-i18n-title="keepOnTop">
           <span class="ico ico-pin"></span>

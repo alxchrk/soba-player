@@ -5,6 +5,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const media = require('./media');
+const airplay = require('./airplay');
 
 app.setName('Soba Player');
 
@@ -234,6 +235,7 @@ app.on('window-all-closed', async () => {
 });
 
 app.on('before-quit', () => {
+  airplay.shutdown();
   // Удаляем всё скачанное этой сессией (временную папку и раздачи в выбранных
   // папках), затем очищаем реестр.
   cleanupStores(pendingCleanup);
@@ -265,6 +267,7 @@ ipcMain.handle('add-torrent', async (_e, source, savePath) => {
   // Локальный файл (infoHash null) ничего не скачивает, чистить нечего. Папка,
   // существовавшая до открытия, остаётся: удалять чужие данные нельзя.
   if (info.infoHash && !info.preexisting) recordStore(path.join(dir, info.name));
+  if (info.cacheDir) recordStore(info.cacheDir);
   return info;
 });
 
@@ -354,11 +357,12 @@ ipcMain.handle('download-subtitle', async (_e, apiKey, fileId) => {
 // Сохранить полностью скачанный файл в место, выбранное пользователем. Копия не
 // попадает в реестр очистки. Диалог открывается в папке кэша раздачи.
 ipcMain.handle('save-file', async (_e, index) => {
+  const file = media.fileByIndex(index);
+  if (!file) return null;
   const src = media.filePath(index);
-  if (!src) return null;
-  const r = await dialog.showSaveDialog(win, { defaultPath: src });
+  const r = await dialog.showSaveDialog(win, { defaultPath: src || file.name });
   if (r.canceled || !r.filePath || r.filePath === src) return null;
-  await fs.promises.copyFile(src, r.filePath);
+  await media.copyFileTo(index, r.filePath);
   return r.filePath;
 });
 
@@ -373,6 +377,16 @@ ipcMain.handle('file-progress', (_e, index) => {
 });
 
 ipcMain.handle('torrent-stats', () => media.stats());
+ipcMain.handle('airplay-available', () => airplay.available());
+ipcMain.handle('airplay-open', (_e, index, sec, audio, rect) => airplay.open(win, index, sec, audio, rect));
+ipcMain.handle('airplay-seek', (_e, sec) => airplay.seek(sec));
+ipcMain.handle('airplay-command', (_e, cmd) => airplay.command(cmd));
+ipcMain.handle('airplay-audio', (_e, track, sec) => airplay.setAudio(track, sec));
+ipcMain.handle('airplay-load', (_e, index, sec, audio) => airplay.load(index, sec, audio));
+ipcMain.handle('airplay-stop', () => airplay.stop());
+ipcMain.handle('set-speed-limit', (_e, mode) => media.setSpeedLimit(mode));
+ipcMain.handle('set-cache-limit', (_e, gb) => media.setCacheLimit(gb));
+ipcMain.handle('playback-pos', (_e, index, sec, durationSec) => media.setPlaybackPos(index, sec, durationSec));
 
 ipcMain.handle('set-language', (_e, lang) => {
   const l = lang === 'ru' ? 'ru' : 'en';

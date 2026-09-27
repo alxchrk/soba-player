@@ -10,4 +10,5 @@
 /src/**/node_modules/
 /build/ffmpeg/src/
 /build/ffmpeg/bin/
+/build/airplay/bin/
 .DS_Store

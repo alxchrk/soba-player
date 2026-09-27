@@ -37,6 +37,7 @@ class Player {
     this.setVolumeLevel(Number.isFinite(vol) ? vol * 100 : 100);
     this.wireSubtitleDrag();
     this.buildSpeedMenu();
+    this.wireAirplay();
   }
 
   static fmt(sec) {
@@ -65,8 +66,81 @@ class Player {
     this.subtitlesEl.textContent = '';
     this.index = index;
     this.fittedIndex = -1;
+    this.seekTarget = null;
     await this.surface.load(index, prepared, audio);
     this.video.playbackRate = this.speed; // скорость сбрасывается при новом src
+  }
+
+  // AirPlay: кнопка видна, если помощник есть в сборке. Нажатие ставит
+  // локальное видео на паузу и показывает системное меню приёмников поверх
+  // кнопки; после подключения панель управляет телевизором.
+  wireAirplay() {
+    this.airplayBtn = this.root.querySelector('#airplay');
+    window.api.airplayAvailable().then((ok) => this.airplayBtn.classList.toggle('hidden', !ok));
+    this.airplayBtn.addEventListener('click', () => this.showAirplayMenu());
+    window.api.onAirplayEvent((ev) => this.onAirplayEvent(ev));
+  }
+
+  showAirplayMenu() {
+    const r = this.airplayBtn.getBoundingClientRect();
+    if (!this.surface.tv) {
+      this.airplayResume = !this.surface.paused;
+      this.surface.pause();
+    }
+    const rect = { x: r.left, y: r.top, width: r.width, height: r.height };
+    window.api.airplayOpen(this.index, this.surface.currentTime, this.surface.audioTrack, rect).catch(() => {
+      this.osd(t('airplayFailed'));
+      if (this.airplayResume && !this.surface.tv) this.surface.play();
+    });
+  }
+
+  setTvMode(on) {
+    this.root.classList.toggle('tv-mode', on);
+    this.airplayBtn.classList.toggle('active', on);
+  }
+
+  onAirplayEvent(ev) {
+    const s = this.surface;
+    if (ev.type === 'connected') {
+      s.enterTv(s.currentTime);
+      this.setTvMode(true);
+    } else if (ev.type === 'time' && s.tv) {
+      s.tv.pos = ev.pos;
+      s.tv.playing = ev.playing;
+      this.setPlayIcon(!ev.playing);
+      this.onTime();
+    } else if (ev.type === 'ended' && s.tv) {
+      if (this.onEnded) this.onEnded();
+    } else if (ev.type === 'ended-session') {
+      if (s.tv) {
+        // Возврат на Mac с позиции, на которой остановился телевизор.
+        const pos = ev.pos || s.tv.pos;
+        s.leaveTv();
+        this.setTvMode(false);
+        s.seek(pos).then(() => s.play());
+      } else if (this.airplayResume) {
+        s.play();
+      }
+      this.airplayResume = false;
+    } else if (ev.type === 'error') {
+      this.osd(t('airplayFailed'));
+    }
+  }
+
+  // Пока готовится другой источник, прежний не играет и не висит на экране.
+  stop() {
+    if (this.surface.tv) {
+      this.surface.leaveTv();
+      this.setTvMode(false);
+      window.api.airplayStop();
+    }
+    this.airplayResume = false;
+    this.titleText.textContent = '';
+    this.stopMarquee();
+    this.subsGen = (this.subsGen || 0) + 1;
+    this.cues = [];
+    this.subtitlesEl.textContent = '';
+    this.surface.unload();
   }
 
   wire() {
@@ -77,9 +151,9 @@ class Player {
     // Лоадер показывается, только если ожидание длится дольше 400 мс: перезапуск
     // потока при перемотке или короткая пауза буфера не должны им мелькать.
     v.addEventListener('waiting', () => this.showLoader());
-    v.addEventListener('playing', () => this.hideLoader());
+    v.addEventListener('playing', () => { if (!this.surface.skipping) this.hideLoader(); });
     // На паузе событие playing не придёт; данных хватает для старта: лоадер снимается.
-    v.addEventListener('canplay', () => this.hideLoader());
+    v.addEventListener('canplay', () => { if (!this.surface.skipping) this.hideLoader(); });
     v.addEventListener('timeupdate', () => this.onTime());
     // Окно под пропорции кадра, один раз на файл (перезапуски потока не считаются).
     v.addEventListener('loadedmetadata', () => {
@@ -122,7 +196,13 @@ class Player {
       loaderText.textContent = `${t('seekingTo')} ${Player.fmt(sec)}`;
       loaderText.classList.remove('hidden');
     };
-    v.addEventListener('playing', () => loaderText.classList.add('hidden'));
+    v.addEventListener('playing', () => { if (!this.surface.skipping) loaderText.classList.add('hidden'); });
+    // Скрытая докрутка от ключевого кадра до цели закончилась: поток на месте.
+    this.surface.onSkipDone = () => {
+      this.seekPending = false;
+      this.hideLoader();
+      loaderText.classList.add('hidden');
+    };
     // Наведение на таймлайн показывает время под курсором вместо текущего.
     const progress = this.root.querySelector('#progress');
     progress.addEventListener('mousemove', (e) => {
@@ -135,7 +215,7 @@ class Player {
       this.hoverTime = null;
       if (!this.seekPending) this.showTime(this.surface.currentTime, this.surface.duration || 0);
     });
-    v.addEventListener('playing', () => { this.seekPending = false; });
+    v.addEventListener('playing', () => { if (!this.surface.skipping) this.seekPending = false; });
 
     this.volumebar.addEventListener('input', () => {
       v.muted = false;
@@ -297,7 +377,18 @@ class Player {
     this.showTime(sec, d);
     this.updateSeekFill();
     this.renderSubtitle(sec);
+    this.seekTarget = sec;
     this.surface.seek(sec);
+  }
+
+  // Перемотка на delta секунд. Транскод с копированием видео стартует с
+  // ключевого кадра раньше цели, и время встаёт на этот кадр. Пока
+  // воспроизведение не догнало прошлую цель, шаг считается от неё: иначе
+  // повторные нажатия откатываются к тому же ключевому кадру и стоят на месте.
+  seekBy(delta) {
+    const now = this.surface.currentTime;
+    const base = this.seekTarget != null && now < this.seekTarget ? this.seekTarget : now;
+    this.seekTo(base + delta);
   }
 
   // Серая полоса: какая доля файла уже скачана (для торрента с начала файла).
@@ -345,15 +436,15 @@ class Player {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.code === 'Space') { e.preventDefault(); this.toggle(); }
     else if (e.code === 'KeyK') this.toggle();
-    else if (e.code === 'ArrowRight') this.seekTo(this.surface.currentTime + 10);
-    else if (e.code === 'ArrowLeft') this.seekTo(this.surface.currentTime - 10);
+    else if (e.code === 'ArrowRight') this.seekBy(+10);
+    else if (e.code === 'ArrowLeft') this.seekBy(-10);
     else if (e.code === 'ArrowUp') { this.video.muted = false; this.setVolumeLevel(this.volumeLevel + 5); this.osd(`${t('volume')} ${this.volumeLevel}%`); }
     else if (e.code === 'ArrowDown') { this.setVolumeLevel(this.volumeLevel - 5); this.osd(`${t('volume')} ${this.volumeLevel}%`); }
     else if (e.key === '+' || e.key === '=') { this.setSubsScale(this.subsScale + 0.1); this.osd(`${t('subtitlesSize')} ${Math.round(this.subsScale * 100)}%`); }
     else if (e.key === '-' || e.key === '_') { this.setSubsScale(this.subsScale - 0.1); this.osd(`${t('subtitlesSize')} ${Math.round(this.subsScale * 100)}%`); }
     // Буквы по физической клавише: на русской раскладке e.key даёт «д» вместо «l».
-    else if (e.code === 'KeyL') this.seekTo(this.surface.currentTime + 30);
-    else if (e.code === 'KeyJ') this.seekTo(this.surface.currentTime - 30);
+    else if (e.code === 'KeyL') this.seekBy(+30);
+    else if (e.code === 'KeyJ') this.seekBy(-30);
     else if (e.code === 'KeyM') this.toggleMute();
     else if (e.code === 'KeyF') window.api.toggleFullscreen();
     else if (e.key === 'Escape') window.api.exitFullscreen();
@@ -428,8 +519,8 @@ class Player {
     ms.metadata = new MediaMetadata({ title: title || 'Soba Player', artist: 'Soba Player' });
     ms.setActionHandler('play', () => this.surface.play());
     ms.setActionHandler('pause', () => this.surface.pause());
-    ms.setActionHandler('seekbackward', () => this.seekTo(this.surface.currentTime - 10));
-    ms.setActionHandler('seekforward', () => this.seekTo(this.surface.currentTime + 10));
+    ms.setActionHandler('seekbackward', () => this.seekBy(-10));
+    ms.setActionHandler('seekforward', () => this.seekBy(+10));
     ms.setActionHandler('previoustrack', () => { if (this.onSelect && this.listPos > 0) this.onSelect(this.listPos - 1); });
     ms.setActionHandler('nexttrack', () => { if (this.onSelect && this.listPos < this.episodesCount - 1) this.onSelect(this.listPos + 1); });
   }

@@ -19,9 +19,9 @@
     "ffmpeg": "sh build/ffmpeg/build.sh",
     "dev": "electron .",
     "start": "electron .",
-    "build": "sh build/ffmpeg/build.sh && sh -c 'set -a; [ -f .env ] && . ./.env; set +a; electron-builder --mac dir --arm64'",
-    "dist": "sh build/ffmpeg/build.sh && sh -c 'set -a; [ -f .env ] && . ./.env; set +a; electron-builder --mac dmg zip --arm64'",
-    "release": "sh build/ffmpeg/build.sh && sh -c 'set -a; [ -f .env ] && . ./.env; set +a; electron-builder --mac dmg zip --arm64 --publish always'"
+    "build": "sh build/ffmpeg/build.sh && sh build/airplay/build.sh && sh -c 'set -a; [ -f .env ] && . ./.env; set +a; electron-builder --mac dir --arm64'",
+    "dist": "sh build/ffmpeg/build.sh && sh build/airplay/build.sh && sh -c 'set -a; [ -f .env ] && . ./.env; set +a; electron-builder --mac dmg zip --arm64'",
+    "release": "sh build/ffmpeg/build.sh && sh build/airplay/build.sh && sh -c 'set -a; [ -f .env ] && . ./.env; set +a; electron-builder --mac dmg zip --arm64 --publish always'"
   },
   "build": {
     "appId": "ru.sobaplayer.app",
@@ -42,6 +42,13 @@
         "filter": [
           "ffmpeg",
           "ffprobe"
+        ]
+      },
+      {
+        "from": "build/airplay/bin",
+        "to": "airplay",
+        "filter": [
+          "SobaAirPlay"
         ]
       },
       {
@@ -78,6 +85,7 @@
       "notarize": true,
       "category": "public.app-category.video",
       "extendInfo": {
+        "NSLocalNetworkUsageDescription": "Soba Player sends the video to your TV over AirPlay.",
         "CFBundleURLTypes": [
           {
             "CFBundleURLName": "Magnet link",
