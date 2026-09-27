@@ -31,10 +31,18 @@ updates in the background and installs them on the next launch.
   the next episode near the end of the current one.
 - Audio track selection, embedded subtitles, local subtitle files and optional
   online search on OpenSubtitles.com (requires your own free API key).
-- Resume from where you stopped, playback speed, a "keep on top"
-  window, full screen with a trackpad pinch.
+- AirPlay to Apple TV and AirPlay 2 smart TVs: the TV streams the video from
+  the Mac over the home network (HLS), the player window works as a remote.
+  Heavy files are re-encoded by the hardware encoder to fit Wi-Fi, HDR stays
+  HDR.
+- Resume from where you stopped, exact seeking, playback speed, a "keep on
+  top" window, full screen with a trackpad pinch.
+- Download speed: automatic (full speed until 10 minutes are buffered ahead,
+  then twice the video bitrate, then the bitrate itself) or a fixed limit.
 - Downloaded data is a cache: it is deleted when you quit the app, unless you
-  save the finished file explicitly.
+  save the finished file explicitly. An optional disk cache limit keeps only
+  the part around the playback position, so a 70 GB movie plays with a few
+  gigabytes of free space.
 - English and Russian interface.
 
 ### Keyboard shortcuts
@@ -59,11 +67,12 @@ No analytics, no telemetry, no accounts. The app connects only to:
 
 - BitTorrent trackers and peers of the torrent you open;
 - OpenSubtitles.com, only when you search subtitles online with your own key;
-- GitHub, to check for app updates.
+- GitHub, to check for app updates;
+- your TV on the local network, only while AirPlay is on.
 
 ## Roadmap
 
-- AirPlay output to Apple TV and AirPlay 2 smart TVs.
+- Subtitles on the TV during AirPlay.
 - Chromecast output.
 - Streaming from the Mac to iPhone and iPad over HLS on the home network.
 - Intel Mac builds.
