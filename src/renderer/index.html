@@ -159,8 +159,15 @@
     </div>
     <div id="subtitles" class="subtitles"></div>
     <div id="tv-overlay" class="tv-overlay">
-      <span class="ico ico-airplay"></span>
-      <div data-i18n="playingOnTv"></div>
+      <div class="tv-head"><span class="ico ico-airplay"></span><span data-i18n="playingOnTv"></span></div>
+      <div class="tv-title" id="tv-title"></div>
+      <div class="tv-time" id="tv-time"></div>
+      <div class="tv-buttons">
+        <button class="icon-button tv-skip" id="tv-back" data-i18n-title="back10"><span class="ico ico-back10"></span></button>
+        <button class="icon-button tv-play" id="tv-play"><span class="ico ico-pause"></span></button>
+        <button class="icon-button tv-skip" id="tv-forward" data-i18n-title="forward10"><span class="ico ico-forward10"></span></button>
+      </div>
+      <button class="tv-leave" id="tv-leave" data-i18n="playOnMac"></button>
     </div>
 
     <div id="error-overlay" class="error-overlay hidden">

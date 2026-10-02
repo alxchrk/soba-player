@@ -29,7 +29,14 @@ class Player {
     this.speed = parseFloat(localStorage.getItem('speed')) || 1;
     const vol = parseFloat(localStorage.getItem('volume'));
     this.volumeLevel = 100;
-    this.gain = null;
+    this.gain = null; // усиление Web Audio для громкости выше 100%
+    this.audioOpts = {
+      level: localStorage.getItem('audioLevel') === '1',
+      dialog: localStorage.getItem('audioDialog') === '1',
+    };
+    this.surface.audioOpts = { ...this.audioOpts };
+    window.api.setAudioOptions(this.audioOpts);
+    window.api.onAudioOption((name) => this.setAudioOption(name, !this.audioOpts[name]));
     this.video.muted = localStorage.getItem('muted') === '1';
     this.subsScale = 1;
     this.setSubsScale(parseFloat(localStorage.getItem('subsScale')) || 1);
@@ -53,6 +60,7 @@ class Player {
     this.titleText.textContent = title || '';
     this.stopMarquee();
     this.mediaName = title || '';
+    if (this.tvTitle) this.tvTitle.textContent = this.mediaName;
     const audio = audioTrack && prepared.probe.audioTracks && audioTrack < prepared.probe.audioTracks.length ? audioTrack : 0;
     this.populateAudioMenu(prepared.probe.audioTracks, audio);
     this.chapters = prepared.probe.chapters || [];
@@ -61,6 +69,7 @@ class Player {
     this.subsGen = (this.subsGen || 0) + 1; // остановить поток прежней дорожки
     this.cues = [];
     this.subTrack = null;
+    this.subsChoice = null;
     this.subsPending = false;
     this.lastSubsHtml = '';
     this.subtitlesEl.textContent = '';
@@ -79,6 +88,14 @@ class Player {
     window.api.airplayAvailable().then((ok) => this.airplayBtn.classList.toggle('hidden', !ok));
     this.airplayBtn.addEventListener('click', () => this.showAirplayMenu());
     window.api.onAirplayEvent((ev) => this.onAirplayEvent(ev));
+    // Пульт по центру окна в режиме телевизора.
+    this.tvTitle = this.root.querySelector('#tv-title');
+    this.tvTime = this.root.querySelector('#tv-time');
+    this.tvPlay = this.root.querySelector('#tv-play');
+    this.tvPlay.addEventListener('click', () => this.toggle());
+    this.root.querySelector('#tv-back').addEventListener('click', () => this.seekBy(-10));
+    this.root.querySelector('#tv-forward').addEventListener('click', () => this.seekBy(+10));
+    this.root.querySelector('#tv-leave').addEventListener('click', () => window.api.airplayStop());
   }
 
   showAirplayMenu() {
@@ -88,7 +105,7 @@ class Player {
       this.surface.pause();
     }
     const rect = { x: r.left, y: r.top, width: r.width, height: r.height };
-    window.api.airplayOpen(this.index, this.surface.currentTime, this.surface.audioTrack, rect).catch(() => {
+    window.api.airplayOpen(this.index, this.surface.currentTime, this.surface.audioTrack, this.subsChoice, this.audioOpts, rect).catch(() => {
       this.osd(t('airplayFailed'));
       if (this.airplayResume && !this.surface.tv) this.surface.play();
     });
@@ -97,6 +114,8 @@ class Player {
   setTvMode(on) {
     this.root.classList.toggle('tv-mode', on);
     this.airplayBtn.classList.toggle('active', on);
+    this.tvTitle.textContent = this.mediaName;
+    this.wake();
   }
 
   onAirplayEvent(ev) {
@@ -148,6 +167,9 @@ class Player {
 
     v.addEventListener('play', () => this.setPlayIcon(false));
     v.addEventListener('pause', () => this.setPlayIcon(true));
+    // Пока видео идёт на Mac, экран и система не засыпают.
+    v.addEventListener('playing', () => window.api.setPlaying(true));
+    for (const ev of ['pause', 'ended', 'emptied', 'error']) v.addEventListener(ev, () => window.api.setPlaying(false));
     // Лоадер показывается, только если ожидание длится дольше 400 мс: перезапуск
     // потока при перемотке или короткая пауза буфера не должны им мелькать.
     v.addEventListener('waiting', () => this.showLoader());
@@ -246,12 +268,12 @@ class Player {
       if (e.target.closest('.menu') || e.target.closest('.menu-button')) return;
       const anyOpen = this.root.querySelector('.menu:not(.hidden)');
       this.root.querySelectorAll('.menu').forEach((m) => m.classList.add('hidden'));
-      if (anyOpen || e.target.closest('.controls')) return;
+      if (anyOpen || e.target.closest('.controls') || e.target.closest('.tv-overlay button')) return;
       clearTimeout(this.clickTimer);
       this.clickTimer = setTimeout(() => this.toggle(), 220);
     });
     this.root.addEventListener('dblclick', (e) => {
-      if (e.target.closest('.controls')) return;
+      if (e.target.closest('.controls') || e.target.closest('.tv-overlay button')) return;
       clearTimeout(this.clickTimer);
       window.api.toggleFullscreen();
     });
@@ -313,7 +335,9 @@ class Player {
   }
 
   setPlayIcon(paused) {
-    this.playPause.querySelector('.ico').className = 'ico ' + (paused ? 'ico-play' : 'ico-pause');
+    const cls = 'ico ' + (paused ? 'ico-play' : 'ico-pause');
+    this.playPause.querySelector('.ico').className = cls;
+    if (this.tvPlay) this.tvPlay.querySelector('.ico').className = cls;
   }
 
   toggle() {
@@ -367,6 +391,7 @@ class Player {
 
   showTime(t, d) {
     this.timeEl.textContent = `${Player.fmt(t)} / ${Player.fmt(d)}`;
+    if (this.tvTime) this.tvTime.textContent = this.timeEl.textContent;
   }
 
   // Перемотка с клавиш и ползунка: ползунок и время сразу встают на цель.
@@ -391,9 +416,12 @@ class Player {
     this.seekTo(base + delta);
   }
 
-  // Серая полоса: какая доля файла уже скачана (для торрента с начала файла).
-  setDownloadProgress(fraction) {
-    this.buffered.style.width = Math.min(100, Math.max(0, fraction * 100)) + '%';
+  // Серая полоса: докуда файл скачан подряд от текущей позиции. Без позиции
+  // (или файл целиком на диске) доля всего скачанного от начала шкалы.
+  setDownloadProgress(fraction, aheadSec) {
+    const d = this.surface.duration || 0;
+    const upTo = aheadSec != null && d && fraction < 0.999 ? (this.surface.currentTime + aheadSec) / d : fraction;
+    this.buffered.style.width = Math.min(100, Math.max(0, upTo * 100)) + '%';
   }
 
   seekbarActive() {
@@ -421,7 +449,8 @@ class Player {
     if (this.onControlsVisible) this.onControlsVisible(true);
     clearTimeout(this.hideTimer);
     this.hideTimer = setTimeout(() => {
-      if (this.keepAwake || this.surface.paused) return;
+      // В режиме телевизора окно служит пультом, панель не прячется.
+      if (this.keepAwake || this.surface.paused || this.surface.tv) return;
       this.controls.classList.add('hidden-controls');
       this.root.classList.add('cursor-none');
       if (this.onControlsVisible) this.onControlsVisible(false);
@@ -492,24 +521,41 @@ class Player {
     });
   }
 
+  // Меню звука: дорожки (от двух) и переключатели обработки звука, поэтому
+  // кнопка видна всегда.
   populateAudioMenu(tracks, active) {
     const btn = this.root.querySelector('#audio-button');
     const ul = this.root.querySelector('#audio-menu ul');
     ul.innerHTML = '';
-    if (!tracks || tracks.length < 2) { btn.classList.add('hidden'); return; }
     btn.classList.remove('hidden');
-    tracks.forEach((tr, i) => {
-      const li = document.createElement('li');
-      li.textContent = this.trackLabel(tr, i);
-      if (i === (active || 0)) li.classList.add('active');
-      li.addEventListener('click', () => {
-        ul.querySelectorAll('li').forEach((x) => x.classList.remove('active'));
-        li.classList.add('active');
-        this.surface.setAudioTrack(i);
-        if (this.onAudioChange) this.onAudioChange(i);
+    if (tracks && tracks.length >= 2) {
+      tracks.forEach((tr, i) => {
+        const li = document.createElement('li');
+        li.textContent = this.trackLabel(tr, i);
+        li.classList.add('track');
+        if (i === (active || 0)) li.classList.add('active');
+        li.addEventListener('click', () => {
+          ul.querySelectorAll('li.track').forEach((x) => x.classList.remove('active'));
+          li.classList.add('active');
+          this.surface.setAudioTrack(i);
+          if (this.onAudioChange) this.onAudioChange(i);
+        });
+        ul.appendChild(li);
       });
+    }
+    ['level', 'dialog'].forEach((opt, i) => {
+      const li = document.createElement('li');
+      li.className = 'menu-toggle' + (i === 0 && tracks && tracks.length >= 2 ? ' toggle-first' : '');
+      li.dataset.opt = opt;
+      const label = document.createElement('span');
+      label.textContent = t(opt === 'level' ? 'audioLevel' : 'audioDialog');
+      const sw = document.createElement('span');
+      sw.className = 'mini-switch';
+      li.append(label, sw);
+      li.addEventListener('click', () => this.setAudioOption(opt, !this.audioOpts[opt]));
       ul.appendChild(li);
     });
+    this.renderAudioToggles();
   }
 
   // Название и кнопки в системном виджете «Сейчас играет» и на медиаклавишах.
@@ -540,16 +586,44 @@ class Player {
     level = Math.max(0, Math.min(200, Math.round(level)));
     this.volumeLevel = level;
     this.video.volume = Math.min(1, level / 100);
-    if (level > 100 && !this.gain) {
-      try {
-        const ctx = new AudioContext();
-        this.gain = ctx.createGain();
-        ctx.createMediaElementSource(this.video).connect(this.gain).connect(ctx.destination);
-      } catch (_) {}
-    }
-    if (this.gain) this.gain.gain.value = Math.max(1, level / 100);
+    if (level > 100) this.ensureAudioGraph();
+    this.applyGain();
     this.updateVolumeFill();
     this.saveVolume();
+  }
+
+  // Громкость выше 100%: усиление через Web Audio (элемент потом нельзя
+  // отвязать от графа, поэтому граф создаётся один раз и живёт до конца).
+  // Обработка звука (выравнивание, диалоги) делается в ffmpeg, см. audioFilters
+  // в media.js: там у неё есть звук впереди воспроизведения.
+  ensureAudioGraph() {
+    if (this.gain) return;
+    try {
+      const ctx = new AudioContext();
+      this.gain = ctx.createGain();
+      ctx.createMediaElementSource(this.video).connect(this.gain).connect(ctx.destination);
+    } catch (_) {}
+  }
+
+  applyGain() {
+    if (this.gain) this.gain.gain.value = Math.max(1, this.volumeLevel / 100);
+  }
+
+  // Выравнивание громкости и усиление диалогов: верхнее меню и меню дорожек.
+  setAudioOption(name, on) {
+    this.audioOpts = { ...this.audioOpts, [name]: on };
+    try { localStorage.setItem(name === 'level' ? 'audioLevel' : 'audioDialog', on ? '1' : '0'); } catch (_) {}
+    window.api.setAudioOptions(this.audioOpts);
+    this.renderAudioToggles();
+    this.surface.setAudioOpts(this.audioOpts);
+    if (this.surface.tv) window.api.airplayAudioOptions(this.audioOpts, this.surface.currentTime);
+    this.osd(`${t(name === 'level' ? 'audioLevel' : 'audioDialog')}: ${t(on ? 'on' : 'off')}`);
+  }
+
+  renderAudioToggles() {
+    this.root.querySelectorAll('#audio-menu .menu-toggle').forEach((li) => {
+      li.classList.toggle('on', !!this.audioOpts[li.dataset.opt]);
+    });
   }
 
   // Масштаб субтитров 60..200%, клавиши + и -.
@@ -652,7 +726,14 @@ class Player {
   // Выбор субтитров сообщается наружу для памяти по раздаче:
   // null, { kind: 'track', track } или { kind: 'file', path, name }.
   notifySubs(choice) {
+    this.setSubsChoice(choice);
     if (this.onSubsChange) this.onSubsChange(choice);
+  }
+
+  // Текущий выбор субтитров; на телевизоре дорожка в потоке меняется вместе с ним.
+  setSubsChoice(choice) {
+    this.subsChoice = choice || null;
+    if (this.surface.tv) window.api.airplaySubs(this.subsChoice, this.surface.currentTime);
   }
 
   // Пункт меню для внешнего файла или скачанных субтитров, отмеченный активным.
@@ -675,11 +756,13 @@ class Player {
       if (!li) return;
       this.selectSub(li);
       this.loadSubtitle(saved.track, this.subIndex);
+      this.setSubsChoice(saved);
     } else if (saved.kind === 'file' && saved.path) {
       try {
         const vtt = await window.api.externalSubs(saved.path);
         this.setCuesFromVtt(vtt);
         this.addFileItem(saved.name || saved.path.split('/').pop());
+        this.setSubsChoice(saved);
       } catch (_) {}
     }
   }
@@ -713,6 +796,7 @@ class Player {
   // назад за начало загруженного или далеко вперёд перезапускает чтение.
   async loadSubtitle(track, index, fromSec) {
     const gen = (this.subsGen = (this.subsGen || 0) + 1);
+    if (this.subsAbort) { this.subsAbort.abort(); this.subsAbort = null; }
     this.cues = [];
     this.subtitlesEl.textContent = '';
     this.subTrack = track;
@@ -722,8 +806,13 @@ class Player {
     this.subsFrom = from;
     this.subsPending = true;
     const url = await window.api.subsUrl(index, track, from);
+    // Прежнее чтение обрывается сразу: сервер по закрытию запроса останавливает
+    // его ffmpeg, иначе тот дочитывал бы файл в фоне.
+    if (this.subsAbort) this.subsAbort.abort();
+    const abort = (this.subsAbort = new AbortController());
+    if (gen !== this.subsGen) return abort.abort();
     try {
-      const reader = (await fetch(url)).body.getReader();
+      const reader = (await fetch(url, { signal: abort.signal })).body.getReader();
       const decoder = new TextDecoder();
       let rest = '';
       for (;;) {

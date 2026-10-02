@@ -22,7 +22,8 @@ const VIDEO_EXT = new Set(['mkv', 'mp4', 'm4v', 'avi', 'mov', 'wmv', 'flv', 'web
 
 let WebTorrent = null;
 let client = null;
-const state = { torrent: null, server: null, port: 0, transcoder: null };
+// pending: раздача, открытая, но ещё без метаданных ({ torrent, reject }).
+const state = { torrent: null, pending: null, server: null, port: 0, transcoder: null };
 
 function ext(name) {
   const i = name.lastIndexOf('.');
@@ -45,8 +46,14 @@ const PUBLIC_TRACKERS = [
   'udp://tracker.openbittorrent.com:6969/announce',
 ];
 
-async function ensureClient() {
-  if (client) return client;
+// Клиент создаётся один раз, в том числе при нескольких одновременных вызовах.
+let clientReady = null;
+function ensureClient() {
+  if (!clientReady) clientReady = createClient();
+  return clientReady;
+}
+
+async function createClient() {
   WebTorrent = (await import('webtorrent')).default;
   // maxConns: сколько пиров держать одновременно (по умолчанию 55).
   // utp: false, потому что нативный utp-native под Electron роняет главный
@@ -183,6 +190,14 @@ function killTranscoder() {
 }
 
 async function destroyCurrent() {
+  // Раздача, не успевшая получить метаданные, отменяется: иначе она позже
+  // перехватила бы текущее состояние и качалась бы в фоне.
+  if (state.pending) {
+    const { torrent, reject } = state.pending;
+    state.pending = null;
+    try { torrent.destroy(); } catch (_) {}
+    reject(new Error('superseded'));
+  }
   killTranscoder();
   speed.pos = null;
   clearInterval(cache.timer);
@@ -194,10 +209,20 @@ async function destroyCurrent() {
   if (state.torrent) {
     // Освобождаем торрент. Скачанное во временной папке остаётся до выхода из
     // приложения: серии этой сессии доступны при переключении. Папку целиком
-    // удаляет before-quit при закрытии.
-    await new Promise((res) => state.torrent.destroy(res));
+    // удаляет before-quit при закрытии. Ссылка обнуляется до ожидания: при
+    // быстром повторном открытии второй destroy той же раздачи не вернул бы
+    // колбэк, и открытие зависло бы.
+    const torrent = state.torrent;
     state.torrent = null;
+    await new Promise((res) => torrent.destroy(res));
   }
+}
+
+// Номер открытия: после каждого ожидания устаревшее открытие (пользователь уже
+// выбрал другой источник) прерывается и не трогает состояние.
+let openSeq = 0;
+function checkCurrent(seq) {
+  if (seq !== openSeq) throw new Error('superseded');
 }
 
 function fileByIndex(index) {
@@ -242,7 +267,49 @@ function serveRaw(req, res, file) {
   stream.pipe(res);
 }
 
-function buildTranscodeArgs(index, seek, audioTrack, probe) {
+// Звуковые фильтры ffmpeg, общие для воспроизведения на Mac и для AirPlay.
+// ffmpeg обрабатывает звук раньше, чем он прозвучит, поэтому фильтры видят
+// звук впереди. Веса и точки подобраны замерами громкости (EBU R128) на
+// тихой, обычной и громкой сценах фильма с дорожкой 5.1.
+//
+// Диалоги: сведение в стерео с поднятым центральным каналом, в котором у 5.1
+// и 7.1 идёт речь. Голос заметнее примерно на 7 дБ, общая громкость почти как
+// у обычного сведения. У 5.1(side) нет BL, у 5.1 нет SL: pan пропускает
+// отсутствующие. Канал сабвуфера не подмешивается, как и при обычном
+// сведении: в нём рокот, на динамиках ноутбука он гудит. У стерео центр
+// сначала выделяет dialoguenhance.
+const DIALOG_PAN = 'pan=stereo|FL=0.6*FL+1.0*FC+0.45*BL+0.45*SL|FR=0.6*FR+1.0*FC+0.45*BR+0.45*SR';
+// Выравнивание громкости: передаточная кривая с мёртвой зоной. От -31 до -20
+// дБ огибающей звук не меняется (обычные сцены), тише подтягивается к нижней
+// границе, громче опускается к верхней, тишина ниже -64 не трогается, чтобы
+// не поднимать фоновый гул. Подъём за 1.5 с, спад за 0.3 с; delay даёт те же
+// 0.3 с заглядывания вперёд, так что громкая сцена приглушается к своему
+// началу, а не после него (задержку compand компенсирует сам).
+const LEVEL_COMPAND = 'compand=attacks=0.3:decays=1.5:soft-knee=6:delay=0.3:'
+  + 'points=-80/-80|-64/-64|-54/-37|-44/-30|-31/-30|-20/-20|-10/-15|0/-12';
+// Ограничитель пиков всегда в конце: сведение 5.1 в стерео на взрывах даёт
+// пики выше 0 dBFS, и они хрипят. level=0: только срез пиков, без
+// автоподъёма громкости; latency=1: его заглядывание (5 мс) компенсируется.
+const PEAK_LIMITER = 'alimiter=limit=0.85:level=0:latency=1';
+function audioFilters(channels, opts = {}) {
+  const f = [];
+  if (opts.dialog && channels >= 2) {
+    if (channels === 2) f.push('dialoguenhance');
+    f.push(DIALOG_PAN);
+  } else {
+    f.push('aformat=channel_layouts=stereo');
+  }
+  if (opts.level) f.push(LEVEL_COMPAND);
+  f.push(PEAK_LIMITER);
+  return ['-af', f.join(',')];
+}
+
+function trackChannels(probe, audioTrack) {
+  const tr = probe && probe.audioTracks && probe.audioTracks[audioTrack || 0];
+  return (tr && tr.channels) || 2;
+}
+
+function buildTranscodeArgs(index, seek, audioTrack, probe, audioOpts) {
   const args = ['-hide_banner', '-loglevel', 'error'];
   // Видео копируем, если кодек нативный, иначе аппаратный энкод.
   const copyVideo = !!(probe && NATIVE_VIDEO.has(probe.video && probe.video.codec));
@@ -261,6 +328,7 @@ function buildTranscodeArgs(index, seek, audioTrack, probe) {
   } else {
     args.push('-c:v', 'h264_videotoolbox', '-b:v', '8M');
   }
+  args.push(...audioFilters(trackChannels(probe, audioTrack), audioOpts));
   args.push('-c:a', 'aac', '-ac', '2', '-b:a', '192k');
   args.push('-movflags', 'frag_keyframe+empty_moov+default_base_moof');
   args.push('-f', 'mp4', 'pipe:1');
@@ -271,7 +339,7 @@ function servePlay(req, res, index, query, probe) {
   killTranscoder();
   const seek = parseFloat(query.get('t') || '0') || 0;
   const audioTrack = parseInt(query.get('a') || '0', 10) || 0;
-  const args = buildTranscodeArgs(index, seek, audioTrack, probe);
+  const args = buildTranscodeArgs(index, seek, audioTrack, probe, { dialog: query.get('d') === '1', level: query.get('l') === '1' });
   // ACAO: страница file:// подключает звук через Web Audio (громкость выше 100%),
   // для этого элемент грузит поток в режиме crossorigin.
   res.writeHead(200, { 'Content-Type': 'video/mp4', 'Access-Control-Allow-Origin': '*' });
@@ -308,10 +376,13 @@ function serveSubs(req, res, index, query) {
     fs.createReadStream(cached).pipe(res);
     return;
   }
-  const args = ['-hide_banner', '-loglevel', 'error'];
-  // Субтитры идут вперемешку с видео, поэтому чтение с начала файла означало бы
-  // скачивание всего до текущей позиции. Стартуем с позиции просмотра; -copyts
-  // сохраняет абсолютные метки времени.
+  // Субтитры идут вперемешку с видео, и ffmpeg читал бы файл до конца на полной
+  // скорости: с включёнными субтитрами докачивался бы весь фильм мимо лимита
+  // скорости и кэша. Чтение идёт вдвое быстрее фильма после первых 5 минут,
+  // реплики всё равно приходят раньше, чем нужны.
+  const args = ['-hide_banner', '-loglevel', 'error', '-readrate', '2', '-readrate_initial_burst', '300'];
+  // Чтение с начала файла означало бы скачивание всего до текущей позиции.
+  // Стартуем с позиции просмотра; -copyts сохраняет абсолютные метки времени.
   if (from > 0) args.push('-ss', String(from), '-copyts');
   args.push('-i', rawUrl(index), '-map', `0:s:${track}`, '-f', 'webvtt', 'pipe:1');
   const ff = spawn(ffmpegPath, args);
@@ -368,7 +439,11 @@ function startServer() {
       if (kind === 'subs') return serveSubs(req, res, index, u.searchParams);
       res.writeHead(404); res.end();
     });
+    // Пока сервер поднимался, могли открыть другой источник: тогда этот
+    // сервер не нужен и закрывается.
+    const seq = openSeq;
     server.listen(0, '127.0.0.1', () => {
+      if (seq !== openSeq) { server.close(); return resolve(); }
       state.server = server;
       state.port = server.address().port;
       resolve();
@@ -458,7 +533,9 @@ function normalizeSource(source) {
 // поэтому сервер, ffprobe и транскод работают без изменений. Несколько файлов
 // становятся плейлистом.
 async function openLocalFiles(paths) {
+  const seq = ++openSeq;
   await destroyCurrent();
+  checkCurrent(seq);
   state.probeCache = {};
   const files = paths.map((p) => {
     const stat = fs.statSync(p);
@@ -475,6 +552,7 @@ async function openLocalFiles(paths) {
   const name = files.length > 1 ? (paths[0].split('/').slice(-2, -1)[0] || 'Local files') : files[0].name;
   state.torrent = { files, name, destroy: (cb) => cb && cb() };
   await startServer();
+  checkCurrent(seq);
   console.log('[local] ready:', name, '| files:', files.length, '| port:', state.port);
   return {
     name,
@@ -495,26 +573,34 @@ async function addTorrent(source, tmpDir) {
   if (isLocalVideoPath(source)) {
     return openLocalFiles([source]);
   }
+  const seq = ++openSeq;
   await ensureClient();
+  checkCurrent(seq);
   await destroyCurrent();
+  checkCurrent(seq);
   state.probeCache = {};
   const torrentId = normalizeSource(source);
   // Режим кэша: куски в WindowStore в скрытой папке, выбор кусков ведёт
   // cacheTick (deselect: движок сам ничего не выбирает).
   const addOpts = { path: tmpDir, announce: PUBLIC_TRACKERS };
   let cacheDir = null;
+  let torrent = null;
   if (cache.bytes > 0) {
     cacheDir = path.join(tmpDir, '.soba-cache-' + Date.now().toString(36));
     Object.assign(addOpts, {
       store: WindowStore,
       storeCacheSlots: 0,
       deselect: true,
-      storeOpts: { soba: { dir: cacheDir, onCreate: (s) => { cache.store = s; } } },
+      storeOpts: { soba: { dir: cacheDir, onCreate: (s) => { if (state.pending && state.pending.torrent === torrent) cache.store = s; } } },
     });
   }
   return new Promise((resolve, reject) => {
-    const torrent = client.add(torrentId, addOpts);
-    torrent.on('error', reject);
+    torrent = client.add(torrentId, addOpts);
+    state.pending = { torrent, reject };
+    torrent.on('error', (e) => {
+      if (state.pending && state.pending.torrent === torrent) state.pending = null;
+      reject(e);
+    });
     // Папка раздачи, существовавшая до нас (например, та же раздача уже лежит в
     // выбранной папке), не должна попасть под удаление при выходе: имя раздачи
     // известно с metadata, файлы создаются позже.
@@ -523,8 +609,11 @@ async function addTorrent(source, tmpDir) {
       preexisting = fs.existsSync(path.join(tmpDir, torrent.name));
     });
     torrent.on('ready', async () => {
+      if (!state.pending || state.pending.torrent !== torrent) return;
+      state.pending = null;
       state.torrent = torrent;
       await startServer();
+      if (seq !== openSeq) return reject(new Error('superseded'));
       const files = torrent.files.map((f, i) => ({
         index: i, name: f.name, length: f.length, video: isVideo(f.name),
       }));
@@ -597,6 +686,14 @@ function fileProgress(index) {
   return 1;
 }
 
+// Сколько секунд видео скачано подряд от позиции просмотра файла index;
+// null, пока позиция этого файла не известна.
+function aheadSecondsOf(index) {
+  if (!speed.pos || speed.pos.index !== index) return null;
+  const a = aheadSeconds();
+  return a ? a.sec : null;
+}
+
 // Путь к файлу на диске: в папке раздачи или сам локальный файл.
 function filePath(index) {
   const file = fileByIndex(index);
@@ -637,7 +734,8 @@ function seekStart(index, sec) {
 }
 
 // URL потока и точка отсчёта времени для него.
-async function playUrl(index, seekSec, audioTrack) {
+// audioOpts: обработка звука { level, dialog } (флаги l и d в адресе потока).
+async function playUrl(index, seekSec, audioTrack, audioOpts) {
   const q = new URLSearchParams();
   let start = 0;
   if (seekSec > 0) {
@@ -647,6 +745,8 @@ async function playUrl(index, seekSec, audioTrack) {
     start = copyVideo ? await seekStart(index, seekSec) : seekSec;
   }
   if (audioTrack) q.set('a', String(audioTrack));
+  if (audioOpts && audioOpts.dialog) q.set('d', '1');
+  if (audioOpts && audioOpts.level) q.set('l', '1');
   return { url: `http://127.0.0.1:${state.port}/play/${index}?${q.toString()}`, start };
 }
 
@@ -672,5 +772,5 @@ function externalSubs(filePath) {
 module.exports = {
   addTorrent, prepare, playUrl, subsUrl, externalSubs, prefetchBytes, fileProgress, filePath, stats,
   destroyCurrent, setSubsCacheDir, cacheSubtitles, setSpeedLimit, setPlaybackPos, setCacheLimit,
-  rawUrl, seekStart, fileByIndex, copyFileTo, probeOf: (index) => state.probeCache && state.probeCache[index],
+  rawUrl, seekStart, fileByIndex, aheadSecondsOf, copyFileTo, audioFilters, trackChannels, probeOf: (index) => state.probeCache && state.probeCache[index],
 };

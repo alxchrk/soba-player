@@ -4,12 +4,15 @@
 // становится пультом.
 //
 // Протокол: команды JSON-строками в stdin, события JSON-строками в stdout.
-//   {"cmd":"load","url":"http://...","at":1.5}  загрузить поток, встать на секунду at
+//   {"cmd":"load","url":"http://...","at":1.5,"subs":true}  загрузить поток, встать на
+//                                               секунду at; subs включает дорожку субтитров
 //   {"cmd":"pick","x":..,"y":..,"w":..,"h":..}  показать меню приёмников у прямоугольника
 //                                               (экранные координаты с левого верхнего угла)
 //   {"cmd":"play"} {"cmd":"pause"} {"cmd":"seek","t":12.3} {"cmd":"stop"}
 //   события: {"ev":"ready"} {"ev":"route","active":true} {"ev":"time","t":..,"playing":..}
-//            {"ev":"picker","open":false} {"ev":"ended"} {"ev":"error","message":".."}
+//            {"ev":"picker","open":false} {"ev":"subs","name":".."} {"ev":"ended"}
+//            {"ev":"error","message":"..","fatal":true}  fatal: элемент потока упал,
+//                                               без новой загрузки воспроизведения не будет
 // Закрытие stdin (плеер завершился) завершает помощник.
 
 import AppKit
@@ -46,6 +49,12 @@ final class Helper: NSObject, AVRoutePickerViewDelegate {
 
     externalObservation = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] p, _ in
       p.isMuted = !p.isExternalPlaybackActive
+      // Скорость, выставленная до подключения, на приёмник не переносится:
+      // телевизор стоит, а плеер считает, что играет. Пауза и play заново.
+      if p.isExternalPlaybackActive && p.rate > 0 {
+        p.pause()
+        p.play()
+      }
       self?.send(["ev": "route", "active": p.isExternalPlaybackActive])
     }
     rateObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
@@ -59,7 +68,7 @@ final class Helper: NSObject, AVRoutePickerViewDelegate {
     }
     NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: nil, queue: .main) { [weak self] n in
       let err = n.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
-      self?.send(["ev": "error", "message": err?.localizedDescription ?? "playback failed"])
+      self?.send(["ev": "error", "message": err?.localizedDescription ?? "playback failed", "fatal": true])
     }
   }
 
@@ -79,7 +88,7 @@ final class Helper: NSObject, AVRoutePickerViewDelegate {
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let cmd = obj["cmd"] as? String else { return }
     switch cmd {
-    case "load": load(url: obj["url"] as? String ?? "", at: obj["at"] as? Double ?? 0)
+    case "load": load(url: obj["url"] as? String ?? "", at: obj["at"] as? Double ?? 0, subs: obj["subs"] as? Bool ?? false)
     case "pick": pick(x: obj["x"] as? Double ?? 0, y: obj["y"] as? Double ?? 0,
                       w: obj["w"] as? Double ?? 24, h: obj["h"] as? Double ?? 24)
     case "play": player.play()
@@ -96,23 +105,41 @@ final class Helper: NSObject, AVRoutePickerViewDelegate {
 
   // Новый поток. Точная секунда выставляется, когда элемент готов: до этого
   // перемотка у AVPlayer не срабатывает.
-  func load(url: String, at: Double) {
+  func load(url: String, at: Double, subs: Bool) {
     guard let u = URL(string: url) else { return send(["ev": "error", "message": "bad url"]) }
     let wasPlaying = player.timeControlStatus != .paused || player.isExternalPlaybackActive
     let item = AVPlayerItem(url: u)
     pendingSeek = at
     statusObservation = item.observe(\.status, options: [.new]) { [weak self] it, _ in
       guard let self = self else { return }
+      if it.status == .readyToPlay && subs { self.selectSubtitles(it) }
       if it.status == .readyToPlay && self.pendingSeek > 0 {
         let t = self.pendingSeek
         self.pendingSeek = 0
         self.player.seek(to: CMTime(seconds: t, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
       } else if it.status == .failed {
-        self.send(["ev": "error", "message": it.error?.localizedDescription ?? "load failed"])
+        self.send(["ev": "error", "message": it.error?.localizedDescription ?? "load failed", "fatal": true])
       }
     }
     player.replaceCurrentItem(with: item)
     if wasPlaying { player.play() }
+  }
+
+  // Дорожка субтитров из потока включается явно: автоматический выбор AVPlayer
+  // зависит от системных настроек субтитров и может её не показать.
+  func selectSubtitles(_ item: AVPlayerItem) {
+    let apply: (AVMediaSelectionGroup?) -> Void = { group in
+      guard let group = group,
+            let option = group.options.first(where: { !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles) }) ?? group.options.first
+      else { return self.send(["ev": "error", "message": "no subtitle track in stream"]) }
+      item.select(option, in: group)
+      self.send(["ev": "subs", "name": option.displayName])
+    }
+    if #available(macOS 13.0, *) {
+      Task { @MainActor in apply(try? await item.asset.loadMediaSelectionGroup(for: .legible)) }
+    } else {
+      apply(item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible))
+    }
   }
 
   // Меню приёмников: невидимая кнопка AVRoutePickerView ставится поверх

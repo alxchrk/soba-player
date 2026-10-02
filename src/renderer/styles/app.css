@@ -161,6 +161,8 @@ body.modal-open .bar, body.modal-open .titlebar-drag { -webkit-app-region: no-dr
 /* --- Плеер --- */
 #player { position: fixed; inset: 0; }
 .surface { width: 100%; height: 100%; background: #000; display: block; }
+.freeze { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; display: none; pointer-events: none; }
+.freeze.show { display: block; }
 
 .loader {
   position: fixed; top: 50%; left: 50%; width: 54px; height: 54px;
@@ -332,6 +334,13 @@ body.fullscreen .ico-fullscreen { --ico: url("../icons/fullscreen-exit.svg"); }
 }
 .menu li:hover { background: rgba(255,255,255,0.08); color: #fff; }
 .menu li.active { color: #fff; font-weight: 600; }
+/* Переключатель в меню звука: подпись и маленький тумблер. */
+.menu li.menu-toggle { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.menu li.toggle-first { border-top: 1px solid rgba(255,255,255,0.1); }
+.mini-switch { flex: none; position: relative; width: 28px; height: 16px; border-radius: 8px; background: rgba(255,255,255,0.2); transition: background 0.2s; }
+.mini-switch::before { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
+.menu li.menu-toggle.on .mini-switch { background: #0a84ff; }
+.menu li.menu-toggle.on .mini-switch::before { transform: translateX(12px); }
 
 /* --- Оверлей перетаскивания --- */
 #drop-overlay {
@@ -340,11 +349,41 @@ body.fullscreen .ico-fullscreen { --ico: url("../icons/fullscreen-exit.svg"); }
   font-size: 22px; font-weight: 600; color: #fff;
 }
 
-/* Показ на телевизоре: локальный кадр скрыт, по центру надпись. */
+/* Показ на телевизоре: локальный кадр скрыт, окно становится пультом.
+   Нижняя панель в этом режиме не прячется (wake в player.js). */
 .tv-overlay { display: none; }
 #player.tv-mode #video { visibility: hidden; }
+#player.tv-mode { background: radial-gradient(ellipse at 50% 35%, #1c2a3d 0%, #0b0f16 70%); }
 #player.tv-mode .tv-overlay {
-  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 12px; color: rgba(255,255,255,0.8); font-size: 15px; pointer-events: none;
+  position: absolute; inset: 0 0 90px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 0 24px; color: #fff; text-align: center;
 }
-.tv-overlay .ico { width: 56px; height: 56px; background: rgba(255,255,255,0.8); }
+#player.tv-mode #subtitles { display: none; }
+.tv-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #0a84ff; font-weight: 600; }
+.tv-head .ico { width: 18px; height: 18px; background: #0a84ff; }
+.tv-title {
+  max-width: 100%; font-size: 20px; font-weight: 600; line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.tv-time { font-size: 15px; color: rgba(255,255,255,0.6); font-variant-numeric: tabular-nums; }
+.tv-buttons { display: flex; align-items: center; gap: 28px; margin: 8px 0 6px; }
+.tv-skip .ico { width: 36px; height: 36px; }
+.tv-play {
+  width: 76px; height: 76px; border-radius: 50%; background: rgba(255,255,255,0.14); opacity: 1;
+}
+.tv-play:hover { background: rgba(255,255,255,0.22); }
+.tv-play .ico { width: 36px; height: 36px; }
+.tv-leave {
+  background: rgba(255,255,255,0.14); color: #fff; border: none; border-radius: 8px; padding: 9px 18px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.tv-leave:hover { background: rgba(255,255,255,0.22); }
+.ico-back10 { --ico: url("../icons/back-10.svg"); }
+.ico-forward10 { --ico: url("../icons/forward-10.svg"); }
+/* Невысокое окно: без названия и с кнопками поменьше, чтобы пульт влезал над панелью. */
+@media (max-height: 360px) {
+  #player.tv-mode .tv-overlay { gap: 6px; inset: 0 0 80px; }
+  .tv-title { display: none; }
+  .tv-play { width: 56px; height: 56px; }
+  .tv-play .ico, .tv-skip .ico { width: 28px; height: 28px; }
+}

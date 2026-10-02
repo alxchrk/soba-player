@@ -6,6 +6,7 @@ const os = require('os');
 const fs = require('fs');
 const media = require('./media');
 const airplay = require('./airplay');
+const awake = require('./awake');
 
 app.setName('Soba Player');
 
@@ -28,6 +29,7 @@ const MENU_LABELS = {
     hide: 'Hide Soba Player', hideOthers: 'Hide Others', unhide: 'Show All', quit: 'Quit Soba Player',
     undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy', paste: 'Paste', selectAll: 'Select All',
     minimize: 'Minimize', zoom: 'Zoom', close: 'Close Window',
+    audio: 'Audio', audioLevel: 'Even Out Loudness', audioDialog: 'Boost Dialogue',
   },
   ru: {
     settings: 'Настройки…', shortcuts: 'Горячие клавиши', file: 'Файл', open: 'Открыть…', edit: 'Правка', view: 'Вид',
@@ -35,11 +37,15 @@ const MENU_LABELS = {
     hide: 'Скрыть Soba Player', hideOthers: 'Скрыть остальные', unhide: 'Показать все', quit: 'Завершить Soba Player',
     undo: 'Отменить', redo: 'Повторить', cut: 'Вырезать', copy: 'Скопировать', paste: 'Вставить', selectAll: 'Выбрать все',
     minimize: 'Свернуть', zoom: 'Изменить масштаб', close: 'Закрыть окно',
+    audio: 'Звук', audioLevel: 'Выравнивать громкость', audioDialog: 'Усиливать диалоги',
   },
 };
 
+// Обработка звука: состояние хранит окно, main держит копию для галочек меню.
+let audioOptions = { level: false, dialog: false };
+
 // Верхнее меню macOS: имя приложения, настройки (Cmd+,), файл, правка для полей
-// ввода, вид и окно.
+// ввода, вид, звук и окно.
 function buildAppMenu() {
   const L = MENU_LABELS[prefs.lang] || MENU_LABELS.en;
   const template = [
@@ -78,6 +84,13 @@ function buildAppMenu() {
       label: L.view,
       submenu: [
         { label: L.fullscreen, accelerator: 'Ctrl+Cmd+F', click: () => win && win.setFullScreen(!win.isFullScreen()) },
+      ],
+    },
+    {
+      label: L.audio,
+      submenu: [
+        { label: L.audioLevel, type: 'checkbox', checked: audioOptions.level, click: () => win && win.webContents.send('audio-option', 'level') },
+        { label: L.audioDialog, type: 'checkbox', checked: audioOptions.dialog, click: () => win && win.webContents.send('audio-option', 'dialog') },
       ],
     },
     {
@@ -286,8 +299,8 @@ ipcMain.handle('prepare', async (_e, index) => {
   return media.prepare(index);
 });
 
-ipcMain.handle('play-url', (_e, index, seekSec, audioTrack) => {
-  return media.playUrl(index, seekSec, audioTrack);
+ipcMain.handle('play-url', (_e, index, seekSec, audioTrack, audioOpts) => {
+  return media.playUrl(index, seekSec, audioTrack, audioOpts);
 });
 
 ipcMain.handle('subs-url', (_e, index, track, fromSec) => {
@@ -375,17 +388,26 @@ ipcMain.handle('prefetch', (_e, index, bytes) => {
 ipcMain.handle('file-progress', (_e, index) => {
   return media.fileProgress(index);
 });
+ipcMain.handle('file-ahead', (_e, index) => media.aheadSecondsOf(index));
 
 ipcMain.handle('torrent-stats', () => media.stats());
 ipcMain.handle('airplay-available', () => airplay.available());
-ipcMain.handle('airplay-open', (_e, index, sec, audio, rect) => airplay.open(win, index, sec, audio, rect));
+ipcMain.handle('airplay-open', (_e, index, sec, audio, subs, opts, rect) => airplay.open(win, index, sec, audio, subs, opts, rect));
+ipcMain.handle('airplay-subs', (_e, subs, sec) => airplay.setSubs(subs, sec));
+ipcMain.handle('airplay-audio-options', (_e, opts, sec) => airplay.setAudioOptions(opts, sec));
+ipcMain.handle('set-audio-options', (_e, opts) => {
+  audioOptions = { level: !!(opts && opts.level), dialog: !!(opts && opts.dialog) };
+  buildAppMenu();
+});
 ipcMain.handle('airplay-seek', (_e, sec) => airplay.seek(sec));
 ipcMain.handle('airplay-command', (_e, cmd) => airplay.command(cmd));
 ipcMain.handle('airplay-audio', (_e, track, sec) => airplay.setAudio(track, sec));
-ipcMain.handle('airplay-load', (_e, index, sec, audio) => airplay.load(index, sec, audio));
+ipcMain.handle('airplay-load', (_e, index, sec, audio, subs) => airplay.load(index, sec, audio, subs));
 ipcMain.handle('airplay-stop', () => airplay.stop());
 ipcMain.handle('set-speed-limit', (_e, mode) => media.setSpeedLimit(mode));
 ipcMain.handle('set-cache-limit', (_e, gb) => media.setCacheLimit(gb));
+airplay.onActiveChange((on) => awake.set('airplay', on));
+ipcMain.handle('set-playing', (_e, on) => awake.set('playing', !!on));
 ipcMain.handle('playback-pos', (_e, index, sec, durationSec) => media.setPlaybackPos(index, sec, durationSec));
 
 ipcMain.handle('set-language', (_e, lang) => {

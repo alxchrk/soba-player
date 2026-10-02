@@ -23,8 +23,24 @@ const HELPER = [
 
 // Просмотренные сегменты нарезки чистятся не чаще раза в PRUNE_EVERY_MS.
 const PRUNE_EVERY_MS = 10000;
+const RELOAD_DEBOUNCE_MS = 700;
+const RECOVER_MAX = 3;
+const RECOVER_WINDOW_MS = 60000;
 
-const state = { proc: null, win: null, active: false, index: null, audio: 0, start: 0, connectTimer: null, lastT: 0, prunedAt: 0 };
+const state = {
+  proc: null, win: null, active: false, index: null, audio: 0, subs: null, audioOpts: null, start: 0, connectTimer: null, lastT: 0, prunedAt: 0,
+  recoveries: [], reloadTimer: null,
+};
+
+// Слушатель начала и конца показа на телевизоре (main держит систему без сна).
+let activeListener = null;
+function onActiveChange(fn) {
+  activeListener = fn;
+}
+function setActive(on) {
+  state.active = on;
+  if (activeListener) activeListener(on);
+}
 
 function available() {
   return !!HELPER;
@@ -57,7 +73,9 @@ function onHelperEvent(ev) {
   }
   if (ev.ev === 'route') {
     if (ev.active && !state.active) {
-      state.active = true;
+      // Приёмник выбран, когда сеанса уже нет (свёрнут): окну нечем управлять.
+      if (state.index == null) return console.warn('[airplay] route active without a session');
+      setActive(true);
       clearTimeout(state.connectTimer);
       return toWindow({ type: 'connected' });
     }
@@ -65,8 +83,10 @@ function onHelperEvent(ev) {
     return;
   }
   if (ev.ev === 'ended') return toWindow({ type: 'ended' });
+  if (ev.ev === 'subs') return console.log('[airplay] subtitles on:', ev.name);
   if (ev.ev === 'error') {
     console.warn('[airplay]', ev.message);
+    if (ev.fatal && state.index != null) return recover(ev.message);
     return toWindow({ type: 'error', message: ev.message });
   }
 }
@@ -92,24 +112,47 @@ function ensureHelper() {
   });
 }
 
-// Нарезка с секунды sec и загрузка в помощник с точной позицией.
+// Нарезка с секунды sec и загрузка в помощник с точной позицией. Субтитры
+// (state.subs) идут дорожкой в потоке, помощник сразу её включает.
 async function loadAt(index, sec, audio) {
   state.index = index;
   state.audio = audio || 0;
-  const r = await hls.start(index, sec, state.audio);
+  const r = await hls.start(index, sec, state.audio, state.subs, state.audioOpts);
   state.start = r.start;
-  send({ cmd: 'load', url: r.url, at: Math.max(0, sec - r.start) });
+  send({ cmd: 'load', url: r.url, at: Math.max(0, sec - r.start), subs: r.subs });
+}
+
+// Упавший на телевизоре поток (например, телевизор догнал край нарезки)
+// загружается заново с последней позиции на тот же приёмник. Больше
+// RECOVER_MAX раз за RECOVER_WINDOW_MS сеанс сворачивается на Mac.
+function recover(message) {
+  const now = Date.now();
+  state.recoveries = state.recoveries.filter((t) => now - t < RECOVER_WINDOW_MS);
+  if (!state.active || state.recoveries.length >= RECOVER_MAX) {
+    toWindow({ type: 'error', message });
+    return end('error');
+  }
+  state.recoveries.push(now);
+  console.warn('[airplay] reload after failure at', state.start + state.lastT);
+  loadAt(state.index, state.start + state.lastT, state.audio).catch((e) => {
+    toWindow({ type: 'error', message: e.message });
+    end('error');
+  });
 }
 
 // Кнопка AirPlay: подготовить поток с текущей позиции и показать меню
 // приёмников поверх кнопки. rect: прямоугольник кнопки в координатах окна.
-async function open(win, index, sec, audio, rect) {
+async function open(win, index, sec, audio, subs, audioOpts, rect) {
   if (!HELPER) throw new Error('AirPlay helper is missing');
   state.win = win;
   ensureHelper();
   const b = win.getContentBounds();
   const pickAt = { cmd: 'pick', x: b.x + rect.x, y: b.y + rect.y, w: rect.width, h: rect.height };
+  // Таймер от прошлого закрытого меню не должен свернуть сеанс, пока открыто это.
+  clearTimeout(state.connectTimer);
   if (state.active) return send(pickAt); // уже на телевизоре: меню для смены или отключения
+  state.subs = subs || null;
+  state.audioOpts = audioOpts || null;
   await loadAt(index, sec, audio);
   send(pickAt);
 }
@@ -118,10 +161,17 @@ function seek(sec) {
   if (state.index == null) return;
   const r = hls.range();
   if (r && sec >= r.start && sec <= r.end - RANGE_MARGIN_SEC) {
+    clearTimeout(state.reloadTimer);
     send({ cmd: 'seek', t: sec - state.start });
     return;
   }
-  loadAt(state.index, sec, state.audio).catch((e) => toWindow({ type: 'error', message: e.message }));
+  // Серия нажатий за край нарезки даёт один перезапуск на последнюю цель:
+  // частая замена потока подвешивает приёмник.
+  clearTimeout(state.reloadTimer);
+  state.reloadTimer = setTimeout(() => {
+    if (state.index == null) return;
+    loadAt(state.index, sec, state.audio).catch((e) => toWindow({ type: 'error', message: e.message }));
+  }, RELOAD_DEBOUNCE_MS);
 }
 
 function command(cmd) {
@@ -133,9 +183,24 @@ function setAudio(track, sec) {
   loadAt(state.index, sec, track).catch((e) => toWindow({ type: 'error', message: e.message }));
 }
 
-// Другая серия во время показа на телевизоре.
-function load(index, sec, audio) {
+// Другие субтитры (или выключение) во время показа: нарезка с той же позиции.
+function setSubs(subs, sec) {
+  state.subs = subs || null;
   if (state.index == null) return;
+  loadAt(state.index, sec, state.audio).catch((e) => toWindow({ type: 'error', message: e.message }));
+}
+
+// Настройки звука (выравнивание, диалоги) во время показа: нарезка с той же позиции.
+function setAudioOptions(opts, sec) {
+  state.audioOpts = opts || null;
+  if (state.index == null) return;
+  loadAt(state.index, sec, state.audio).catch((e) => toWindow({ type: 'error', message: e.message }));
+}
+
+// Другая серия во время показа на телевизоре.
+function load(index, sec, audio, subs) {
+  if (state.index == null) return;
+  state.subs = subs || null;
   loadAt(index, sec, audio).catch((e) => toWindow({ type: 'error', message: e.message }));
 }
 
@@ -143,9 +208,10 @@ function load(index, sec, audio) {
 // нарезка удаляется, окно получает последнюю позицию для продолжения на Mac.
 function end(reason) {
   clearTimeout(state.connectTimer);
+  clearTimeout(state.reloadTimer);
   const wasActive = state.active;
   const pos = state.start + state.lastT;
-  state.active = false;
+  setActive(false);
   state.index = null;
   state.lastT = 0;
   send({ cmd: 'stop' });
@@ -165,4 +231,4 @@ function shutdown() {
   }
 }
 
-module.exports = { available, open, seek, command, setAudio, load, stop, shutdown };
+module.exports = { onActiveChange, available, open, seek, command, setAudio, setSubs, setAudioOptions, load, stop, shutdown };

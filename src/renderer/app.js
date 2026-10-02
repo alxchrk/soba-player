@@ -395,7 +395,7 @@ setInterval(async () => {
   let frac = 0;
   try {
     frac = await window.api.fileProgress(episodes[currentListPos].index);
-    player.setDownloadProgress(frac);
+    player.setDownloadProgress(frac, await window.api.fileAhead(episodes[currentListPos].index));
   } catch (_) {}
   // Файл на диске целиком (скачан или локальный): выбранная дорожка субтитров
   // уходит в кэш, следующее открытие обходится без ffmpeg.
