@@ -655,6 +655,47 @@ function closeAbout() {
   document.body.classList.remove('modal-open');
 }
 window.api.onOpenAbout(openAbout);
+
+// Обновления: статус в окне «О плеере» и всплывающее уведомление, когда
+// новая версия скачана; после обновления один раз сообщение о новой версии.
+const updateStatus = document.getElementById('update-status');
+const toast = document.getElementById('toast');
+const toastAction = document.getElementById('toast-action');
+const fill = (key, s) => t(key).replace('{v}', s.version || '').replace('{p}', s.percent || 0);
+function showToast(text, action) {
+  document.getElementById('toast-text').textContent = text;
+  toastAction.classList.toggle('hidden', !action);
+  if (action) {
+    toastAction.textContent = action.label;
+    toastAction.onclick = action.run;
+  }
+  toast.classList.remove('hidden');
+}
+document.getElementById('toast-close').addEventListener('click', () => toast.classList.add('hidden'));
+const restartAction = () => ({ label: t('updRestart'), run: () => window.api.updateInstall() });
+let lastUpdateStatus = null;
+function renderUpdate(s) {
+  const keys = { checking: 'updChecking', latest: 'updLatest', downloading: 'updDownloading', ready: 'updReady', error: 'updError', unavailable: 'updUnavailable' };
+  updateStatus.textContent = keys[s.status] ? fill(keys[s.status], s) : '';
+  updateStatus.classList.toggle('ready', s.status === 'ready');
+  const restart = updateStatus.querySelector('.about-update-restart');
+  if (s.status === 'ready' && !restart) {
+    const b = document.createElement('button');
+    b.className = 'about-update-restart';
+    b.textContent = t('updRestart');
+    b.addEventListener('click', () => window.api.updateInstall());
+    updateStatus.appendChild(document.createElement('br'));
+    updateStatus.appendChild(b);
+  }
+  if (s.status === 'ready' && lastUpdateStatus !== 'ready') showToast(fill('updReady', s), restartAction());
+  lastUpdateStatus = s.status;
+}
+window.api.onUpdateState(renderUpdate);
+window.api.updateState().then(renderUpdate).catch(() => {});
+document.getElementById('update-check').addEventListener('click', () => window.api.updateCheck().then(renderUpdate));
+window.api.updatedFrom().then(async (from) => {
+  if (from) showToast(t('updUpdated').replace('{v}', await window.api.appVersion()));
+}).catch(() => {});
 document.getElementById('close-about').addEventListener('click', closeAbout);
 aboutModal.addEventListener('click', (e) => { if (e.target === aboutModal) closeAbout(); });
 

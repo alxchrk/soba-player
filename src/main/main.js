@@ -7,11 +7,13 @@ const fs = require('fs');
 const media = require('./media');
 const airplay = require('./airplay');
 const awake = require('./awake');
+const updates = require('./updates');
 
 app.setName('Soba Player');
 
 // Язык интерфейса хранится и в main (для меню до загрузки окна), и в окне.
 let prefsFile = null;
+let updatedFrom = null;
 let prefs = { lang: 'en' };
 function loadPrefs() {
   try { prefs = { ...prefs, ...JSON.parse(fs.readFileSync(prefsFile, 'utf8')) }; } catch (_) {}
@@ -229,17 +231,18 @@ app.on('ready', () => {
     app.dock.setIcon(path.join(__dirname, '..', '..', 'build', 'icon.png'));
   }
   createWindow();
-  // Обновления из GitHub Releases: проверка через полминуты после старта,
-  // скачивание в фоне, установка при следующем запуске (уведомление системы).
-  if (app.isPackaged) {
-    setTimeout(() => {
-      try {
-        const { autoUpdater } = require('electron-updater');
-        autoUpdater.logger = null;
-        autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-      } catch (_) {}
-    }, 30000);
-  }
+  // Обновления: проверка через полминуты после старта, дальше updates.js.
+  updates.init(
+    (s) => { if (win && !win.isDestroyed()) win.webContents.send('update-state', s); },
+    (version) => (prefs.lang === 'ru'
+      ? { title: 'Soba Player ' + version, body: 'Обновление скачано. Установится при перезапуске плеера.' }
+      : { title: 'Soba Player ' + version, body: 'The update is downloaded. It installs when you restart the player.' }),
+  );
+  if (app.isPackaged) setTimeout(() => updates.check(), 30000);
+  // Версия, с которой плеер запускался прошлый раз: окно сообщает об обновлении.
+  updatedFrom = prefs.lastVersion && prefs.lastVersion !== app.getVersion() ? prefs.lastVersion : null;
+  prefs.lastVersion = app.getVersion();
+  savePrefs();
 });
 
 app.on('window-all-closed', async () => {
@@ -459,6 +462,11 @@ ipcMain.handle('set-always-on-top', (_e, on) => {
 });
 
 ipcMain.handle('app-version', () => app.getVersion());
+ipcMain.handle('update-check', () => updates.check());
+ipcMain.handle('update-state', () => updates.current());
+ipcMain.handle('update-install', () => updates.install());
+// Плеер обновился с прошлого запуска: прежняя версия, иначе null. Отдаётся один раз.
+ipcMain.handle('updated-from', () => { const v = updatedFrom; updatedFrom = null; return v; });
 
 // Показывать окно на всех виртуальных рабочих столах (Spaces).
 ipcMain.handle('set-all-desktops', (_e, on) => {

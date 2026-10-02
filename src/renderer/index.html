@@ -132,11 +132,21 @@
     </div>
   </div>
 
+  <div class="toast hidden" id="toast">
+    <span class="toast-text" id="toast-text"></span>
+    <button class="toast-action hidden" id="toast-action"></button>
+    <button class="toast-close" id="toast-close" aria-label="×">×</button>
+  </div>
+
   <div class="modal hidden" id="about-modal">
     <div class="modal-card modal-card-narrow no-drag about-card">
       <img class="about-card-icon" src="icons/app.png" alt="">
       <div class="about-card-name">Soba Player</div>
       <div class="about-card-version" id="about-version"></div>
+      <div class="about-update">
+        <button class="about-update-button" id="update-check" data-i18n="checkUpdates"></button>
+        <div class="about-update-status" id="update-status"></div>
+      </div>
       <div class="about-card-desc" data-i18n="aboutDesc"></div>
       <div class="about-card-author" data-i18n="byAuthor"></div>
       <div class="about-links about-card-links">
