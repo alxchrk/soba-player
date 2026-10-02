@@ -33,8 +33,12 @@ updates in the background and installs them on the next launch.
   online search on OpenSubtitles.com (requires your own free API key).
 - AirPlay to Apple TV and AirPlay 2 smart TVs: the TV streams the video from
   the Mac over the home network (HLS), the player window works as a remote.
-  Heavy files are re-encoded by the hardware encoder to fit Wi-Fi, HDR stays
-  HDR.
+  The TV shows the full movie timeline and can seek on its own; subtitles are
+  shown on the TV. Heavy files are re-encoded by the hardware encoder to fit
+  Wi-Fi, HDR stays HDR.
+- Sound options: even out loudness and boost dialogue, on the Mac and on the
+  TV.
+- The Mac does not go to sleep while a video plays or while AirPlay is on.
 - Resume from where you stopped, exact seeking, playback speed, a "keep on
   top" window, full screen with a trackpad pinch.
 - Download speed: automatic (full speed until 10 minutes are buffered ahead,
@@ -72,7 +76,7 @@ No analytics, no telemetry, no accounts. The app connects only to:
 
 ## Roadmap
 
-- Subtitles on the TV during AirPlay.
+- Keep the downloaded part of an unfinished movie between launches.
 - Chromecast output.
 - Streaming from the Mac to iPhone and iPad over HLS on the home network.
 - Intel Mac builds.

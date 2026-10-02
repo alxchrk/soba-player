@@ -1,6 +1,6 @@
 {
   "name": "soba-player",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "productName": "Soba Player",
   "description": "Minimal torrent streaming player for macOS",
   "author": "alxchrk (https://github.com/alxchrk)",
