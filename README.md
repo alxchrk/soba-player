@@ -48,10 +48,6 @@ updates in the background and installs them on the next launch.
   the part around the playback position, so a 70 GB movie plays with a few
   gigabytes of free space.
 - English and Russian interface.
-- Watch hooks for your own automation: if an executable
-  `~/Library/Application Support/Soba Player/hooks/on-watch` exists, the
-  player runs it on start, pause, resume and stop with a JSON description of
-  the viewing session on stdin. Without the file nothing runs.
 
 ### Keyboard shortcuts
 
