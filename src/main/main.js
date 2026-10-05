@@ -8,6 +8,7 @@ const media = require('./media');
 const airplay = require('./airplay');
 const awake = require('./awake');
 const updates = require('./updates');
+const watchHooks = require('./watch-hooks');
 
 app.setName('Soba Player');
 
@@ -218,6 +219,11 @@ app.on('ready', () => {
   prefsFile = path.join(app.getPath('userData'), 'prefs.json');
   loadPrefs();
   media.setSubsCacheDir(path.join(app.getPath('userData'), 'subtitles-cache'));
+  watchHooks.init(app.getPath('userData'), app.getVersion(), (index) => {
+    const file = media.fileByIndex(index);
+    const probe = media.probeOf(index);
+    return { fileName: file && file.name, path: media.filePath(index), metaTitle: probe && probe.title };
+  });
   // Хвосты от прошлой сессии: если приложение закрылось аварийно, before-quit
   // мог не отработать. Удаляем записанные раздачи и временную папку.
   cleanupStores(loadCleanup());
@@ -251,6 +257,7 @@ app.on('window-all-closed', async () => {
 });
 
 app.on('before-quit', () => {
+  watchHooks.shutdown();
   airplay.shutdown();
   // Удаляем всё скачанное этой сессией (временную папку и раздачи в выбранных
   // папках), затем очищаем реестр.
@@ -279,7 +286,10 @@ ipcMain.handle('open-dialog', async () => {
 
 ipcMain.handle('add-torrent', async (_e, source, savePath) => {
   const dir = savePath || TMP_DIR;
+  // Сеанс прежнего источника закрывается до открытия нового.
+  watchHooks.setSource(null);
   const info = await media.addTorrent(source, dir);
+  watchHooks.setSource(info.name);
   // Локальный файл (infoHash null) ничего не скачивает, чистить нечего. Папка,
   // существовавшая до открытия, остаётся: удалять чужие данные нельзя.
   if (info.infoHash && !info.preexisting) recordStore(path.join(dir, info.name));
@@ -411,7 +421,11 @@ ipcMain.handle('set-speed-limit', (_e, mode) => media.setSpeedLimit(mode));
 ipcMain.handle('set-cache-limit', (_e, gb) => media.setCacheLimit(gb));
 airplay.onActiveChange((on) => awake.set('airplay', on));
 ipcMain.handle('set-playing', (_e, on) => awake.set('playing', !!on));
-ipcMain.handle('playback-pos', (_e, index, sec, durationSec) => media.setPlaybackPos(index, sec, durationSec));
+ipcMain.handle('playback-pos', (_e, index, sec, durationSec) => {
+  media.setPlaybackPos(index, sec, durationSec);
+  watchHooks.setPos(index, sec);
+});
+ipcMain.handle('watch-state', (_e, index, playing, sec, durationSec) => watchHooks.update(index, !!playing, sec, durationSec));
 
 ipcMain.handle('set-language', (_e, lang) => {
   const l = lang === 'ru' ? 'ru' : 'en';

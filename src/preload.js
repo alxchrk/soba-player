@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('api', {
   setCacheLimit: (gb) => ipcRenderer.invoke('set-cache-limit', gb),
   setPlaying: (on) => ipcRenderer.invoke('set-playing', on),
   playbackPos: (index, sec, durationSec) => ipcRenderer.invoke('playback-pos', index, sec, durationSec),
+  watchState: (index, playing, sec, durationSec) => ipcRenderer.invoke('watch-state', index, playing, sec, durationSec),
   airplayAvailable: () => ipcRenderer.invoke('airplay-available'),
   airplayOpen: (index, sec, audio, subs, opts, rect) => ipcRenderer.invoke('airplay-open', index, sec, audio, subs, opts, rect),
   airplaySubs: (subs, sec) => ipcRenderer.invoke('airplay-subs', subs, sec),

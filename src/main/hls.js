@@ -4,14 +4,19 @@
 // во время сеанса, путь содержит случайный токен.
 //
 // Два режима плейлиста:
-// - VOD (видео копируется, у mkv есть индекс ключевых кадров): плейлист всего
-//   фильма от нуля до конца строится сразу, сегмент равен промежутку между
-//   соседними ключевыми кадрами, время в сегментах абсолютное. Телевизор знает
+// - VOD: плейлист всего фильма от нуля до конца строится сразу, время в
+//   сегментах абсолютное. ffmpeg отдаёт непрерывный поток fMP4 с фрагментом на
+//   каждый ключевой кадр, а сегменты из фрагментов складываются здесь по плану:
+//   при копировании видео граница сегмента это первый ключевой кадр не раньше
+//   SEGMENT_SEC от начала сегмента (индекс mkv), при перекодировании ключевой
+//   кадр ставится каждые N кадров и сегмент равен фрагменту. Сегментатор ffmpeg
+//   для этого не годится: его границы зависят от точки старта. Телевизор знает
 //   длительность и позицию, перематывает сам. Запрос ещё не нарезанного сегмента
 //   ждёт его готовности; запрос далеко впереди нарезки или позади неё
 //   перезапускает ffmpeg с этого сегмента. Плейлист не меняется, поэтому
 //   ошибка «плейлист не обновляется» (-12888) здесь невозможна.
-// - EVENT (перекодирование или нет индекса): плейлист растёт по мере нарезки
+// - EVENT (копия без индекса mkv, перекодирование видео с переменной частотой
+//   кадров): плейлист растёт по мере нарезки
 //   сегментами по SEGMENT_SEC. Перемотка внутри нарезанного идёт силами плеера,
 //   за его пределами сеанс перезапускается с новой позиции (новый номер в пути).
 //
@@ -35,9 +40,10 @@ const mkvCues = require('./mkv-cues');
 
 const SEGMENT_SEC = 4;
 const ROOT = path.join(os.tmpdir(), 'torrent-player-hls');
-// Выше этого битрейта исходник пережимается: Wi-Fi до телевизора его не
-// вытягивает (фильм на 40 ГБ длиной 2 часа это ~45 Мбит/с).
-const COPY_MAX_BITRATE = 25e6;
+// Выше этого битрейта исходник пережимается: с запасом на соседей по Wi-Fi
+// телевизор такой поток не вытягивает (ремукс 4K это 50-80 Мбит/с). Ремуксы
+// 1080p (25-40 Мбит/с) идут как есть.
+const COPY_MAX_BITRATE = 40e6;
 // Нарезка идёт не быстрее READ_RATE скорости фильма после первых
 // READ_BURST_SEC: запас впереди телевизора растёт медленно и не съедает диск
 // и лимит кэша раздачи. Просмотренные сегменты старше KEEP_BEHIND_SEC удаляются.
@@ -53,21 +59,31 @@ const SUB_TIMESTAMP_MAP = 'X-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000';
 // ждёт её, дальше нарезка перезапускается с запрошенного.
 const LOOKAHEAD_SEGMENTS = 20;
 const SEGMENT_WAIT_MS = 90000;
+// Запрос ждёт сегмент на краю нарезки, а она старше этого срока (стартовый
+// рывок давно кончился, идёт в темпе READ_RATE): нарезка перезапускается с
+// запрошенного сегмента и снова делает запас READ_BURST_SEC.
+const REBURST_AFTER_MS = 30000;
 // Отпускает запрос субтитров обычно нарезка видео (она впереди телевизора),
 // предел нужен на случай, если нарезка встала.
 const SUBS_WAIT_MS = 60000;
 const POLL_MS = 200;
 // -ss чуть позже ключевого кадра: для видео с B-кадрами ffmpeg сам отступает
-// от точки поиска на 3/23 с назад, и без запаса поиск уходит на предыдущий
-// кадр, а номера сегментов сдвигаются на один. Ключевые кадры реже 0.2 с не стоят.
-const SEEK_EPSILON_SEC = 0.2;
+// от точки поиска на 3/23 с (0.1304) назад, и без запаса поиск уходит на
+// предыдущий ключевой кадр, а фрагменты сдвигаются на один. Запас чуть больше
+// отступа: у Blu-ray ключевые кадры стоят через полсекунды.
+const SEEK_EPSILON_SEC = 0.14;
+// Поток fMP4 в stdout: фрагмент на каждый ключевой кадр видео. delay_moov и
+// frag_discont сохраняют абсолютное время в фрагментах (с empty_moov
+// мультиплексор сбрасывает начало в ноль). Главы не переносятся: из них
+// получается третья дорожка с нулевым временем, с ней AVPlayer поток не берёт.
+const FMP4_ARGS = ['-map_chapters', '-1', '-f', 'mp4', '-movflags', 'frag_keyframe+default_base_moof+frag_discont+delay_moov', 'pipe:1'];
 const KEYFRAMES_TIMEOUT_MS = 20000;
 
 const session = {
   server: null, port: 0, token: null, gen: 0, ff: null, subsFf: null, dir: null, start: 0, pruned: 0,
   subs: null, bandwidth: 0,
   // VOD: план сегментов, текущая нарезка и прогресс субтитров.
-  vod: null, runStart: 0, makeArgs: null, subsRuns: [], makeSubsArgs: null, subsWhole: false, startAt: 0,
+  vod: null, runStart: 0, runAt: 0, runId: 0, cutter: null, makeArgs: null, subsRuns: [], makeSubsArgs: null, subsWhole: false, startAt: 0,
 };
 
 // Индекс ключевых кадров по номеру файла раздачи: чтение индекса стоит
@@ -94,7 +110,6 @@ function videoArgs(probe, file) {
   const v = probe.video || {};
   const bitrate = probe.durationSec ? (file.length * 8) / probe.durationSec : Infinity;
   const tenBit = /10/.test(v.pixFmt || '');
-  const keyframes = ['-force_key_frames', `expr:gte(t,n_forced*${SEGMENT_SEC})`];
   if ((v.codec === 'h264' || v.codec === 'hevc') && bitrate <= COPY_MAX_BITRATE) {
     return { copy: true, args: ['-c:v', 'copy', ...(v.codec === 'hevc' ? ['-tag:v', 'hvc1'] : [])] };
   }
@@ -102,11 +117,29 @@ function videoArgs(probe, file) {
     return {
       copy: false,
       bitrate: 20e6,
-      args: ['-c:v', 'hevc_videotoolbox', '-profile:v', 'main10', '-pix_fmt', 'p010le', '-b:v', '20M', '-tag:v', 'hvc1', ...keyframes],
+      args: ['-c:v', 'hevc_videotoolbox', '-profile:v', 'main10', '-pix_fmt', 'p010le', '-b:v', '20M', '-tag:v', 'hvc1'],
     };
   }
   const rate = (v.height || 1080) > 1080 ? 25e6 : 12e6;
-  return { copy: false, bitrate: rate, args: ['-c:v', 'h264_videotoolbox', '-b:v', String(rate), '-pix_fmt', 'yuv420p', ...keyframes] };
+  return { copy: false, bitrate: rate, args: ['-c:v', 'h264_videotoolbox', '-b:v', String(rate), '-pix_fmt', 'yuv420p'] };
+}
+
+// План VOD для перекодирования: ключевой кадр каждые N кадров (первый кадр
+// не раньше SEGMENT_SEC), сегменты по этой сетке от начала видеодорожки.
+// Сетка в кадрах, а не в секундах: нарезка с любого сегмента попадает в те же
+// границы. null, если частота кадров переменная или неизвестна.
+function gridPlan(probe) {
+  const v = probe.video || {};
+  const total = probe.durationSec;
+  if (!v.fps || !total) return null;
+  const frames = Math.ceil(SEGMENT_SEC * v.fps - 1e-6);
+  const dur = frames / v.fps;
+  const first = v.startSec || 0;
+  const starts = [];
+  for (let t = first; t < total - 0.5; t = first + starts.length * dur) starts.push(t);
+  if (!starts.length) return null;
+  const durs = starts.map((t, i) => (i + 1 < starts.length ? dur : total - t));
+  return { starts, durs, total, frames, fps: v.fps, frags: null };
 }
 
 // План VOD: начало и длительность каждого сегмента по ключевым кадрам mkv.
@@ -127,10 +160,21 @@ async function vodPlan(index, durationSec) {
   const r = keyframeCache.get(index);
   const total = durationSec || (r && r.durationSec);
   if (!r || !total) return null;
-  const starts = r.keyframes.filter((t) => t < total - 0.5);
-  if (!starts.length || starts[0] > 0.5) return null;
+  const kf = r.keyframes.filter((t) => t < total - 0.5);
+  if (!kf.length || kf[0] > 0.5) return null;
+  // Сегмент: ключевые кадры подряд, пока от первого не пройдёт SEGMENT_SEC.
+  // frags[n]: сколько ключевых кадров (фрагментов ffmpeg) в сегменте n.
+  const starts = [];
+  const frags = [];
+  for (let i = 0; i < kf.length;) {
+    let j = i + 1;
+    while (j < kf.length && kf[j] - kf[i] < SEGMENT_SEC) j++;
+    starts.push(kf[i]);
+    frags.push(j - i);
+    i = j;
+  }
   const durs = starts.map((t, i) => (i + 1 < starts.length ? starts[i + 1] : total) - t);
-  return { starts, durs, total };
+  return { starts, durs, total, frags };
 }
 
 // Номер сегмента, внутри которого секунда sec.
@@ -167,6 +211,84 @@ function spawnVideo(args) {
   session.ff = ff;
   ff.stderr.on('data', (d) => console.warn('[ffmpeg hls]', d.toString().trim()));
   ff.on('close', () => { if (session.ff === ff) session.ff = null; });
+  return ff;
+}
+
+// VOD: раскладывает поток fMP4 от ffmpeg по файлам сегментов. ftyp и moov идут
+// в init.mp4, дальше каждый moof начинает фрагмент (один ключевой кадр видео
+// со своим звуком). В сегмент n попадает plan.frags[n] фрагментов подряд (без
+// frags один). Файл пишется под временным именем и переименовывается, когда
+// сегмент закончен: сервер не отдаст недописанный.
+function makeCutter(dir, plan, first, runId) {
+  const st = { seg: first, frags: 0, fd: null, head: Buffer.alloc(0), left: 0, type: '', init: [], initDone: false };
+  const tmp = () => path.join(dir, `${segName(st.seg)}.${runId}.tmp`);
+  const perSeg = (n) => (plan.frags ? plan.frags[n] : 1);
+  const closeSeg = () => {
+    if (st.fd == null) return;
+    fs.closeSync(st.fd);
+    st.fd = null;
+    fs.renameSync(tmp(), path.join(dir, segName(st.seg)));
+    st.seg++;
+    st.frags = 0;
+  };
+  const onBox = () => {
+    if (st.type !== 'moof') return;
+    if (!st.initDone) {
+      const initTmp = path.join(dir, `init.${runId}.tmp`);
+      fs.writeFileSync(initTmp, Buffer.concat(st.init));
+      fs.renameSync(initTmp, path.join(dir, 'init.mp4'));
+      st.initDone = true;
+    }
+    if (st.frags >= perSeg(st.seg)) closeSeg();
+    if (st.fd == null) st.fd = fs.openSync(tmp(), 'w');
+    st.frags++;
+  };
+  const out = (buf) => {
+    if (st.type === 'ftyp' || st.type === 'moov') st.init.push(buf);
+    else if (st.type !== 'mfra' && st.fd != null) fs.writeSync(st.fd, buf);
+  };
+  return {
+    // Первый ещё не дописанный сегмент.
+    get next() { return st.seg; },
+    push(chunk) {
+      let off = 0;
+      while (off < chunk.length) {
+        if (st.left > 0) {
+          const take = Math.min(st.left, chunk.length - off);
+          out(chunk.subarray(off, off + take));
+          off += take;
+          st.left -= take;
+          continue;
+        }
+        // Заголовок бокса: размер и тип, 8 байт (16 при 64-битном размере).
+        const want = st.head.length >= 8 && st.head.readUInt32BE(0) === 1 ? 16 : 8;
+        const take = Math.min(want - st.head.length, chunk.length - off);
+        st.head = Buffer.concat([st.head, chunk.subarray(off, off + take)]);
+        off += take;
+        if (st.head.length < 8) continue;
+        let size = st.head.readUInt32BE(0);
+        if (size === 1) {
+          if (st.head.length < 16) continue;
+          size = Number(st.head.readBigUInt64BE(8));
+        }
+        st.type = st.head.toString('latin1', 4, 8);
+        onBox();
+        st.left = Math.max(0, size - st.head.length);
+        out(st.head);
+        st.head = Buffer.alloc(0);
+      }
+    },
+    // Поток кончился: ok при конце файла (последний сегмент дописан), иначе
+    // недописанный сегмент выбрасывается.
+    end(ok) {
+      if (ok) return closeSeg();
+      if (st.fd != null) {
+        fs.closeSync(st.fd);
+        st.fd = null;
+        fs.rm(tmp(), { force: true }, () => {});
+      }
+    },
+  };
 }
 
 // Субтитры с секунды from в файл subs_<n>.vtt. VOD: прогресс нужен, чтобы
@@ -196,9 +318,13 @@ function spawnSubs(from) {
 function startRun(k) {
   killProc('ff');
   session.runStart = k;
+  session.runAt = Date.now();
   session.pruned = Math.min(session.pruned, k);
-  fs.rmSync(path.join(session.dir, 'ff.m3u8'), { force: true });
-  spawnVideo(session.makeArgs(k));
+  const cutter = makeCutter(session.dir, session.vod, k, ++session.runId);
+  session.cutter = cutter;
+  const ff = spawnVideo(session.makeArgs(k));
+  ff.stdout.on('data', (d) => cutter.push(d));
+  ff.on('close', (code) => cutter.end(code === 0));
   // Внешний файл переводится целиком один раз, встроенная дорожка читается с k.
   if (session.subsWhole) {
     if (!session.subsRuns.length) spawnSubs(0);
@@ -210,9 +336,7 @@ function startRun(k) {
 
 // VOD: первый ещё не нарезанный сегмент текущей нарезки.
 function runNext() {
-  let text = '';
-  try { text = fs.readFileSync(path.join(session.dir, 'ff.m3u8'), 'utf8'); } catch (_) {}
-  return session.runStart + (text.match(/#EXTINF:/g) || []).length;
+  return session.cutter ? session.cutter.next : session.runStart;
 }
 
 function playlistPath() {
@@ -379,7 +503,8 @@ async function serveVodFile(req, res, name, k, gen) {
     if (k != null && !restarted) {
       const next = runNext();
       // k < next при отсутствии файла: сегмент уже удалён как просмотренный.
-      if (!session.ff || k < session.runStart || k < next || k > next + LOOKAHEAD_SEGMENTS) {
+      const stale = Date.now() - session.runAt > REBURST_AFTER_MS;
+      if (!session.ff || k < session.runStart || k < next || k > next + LOOKAHEAD_SEGMENTS || stale) {
         startRun(k);
         restarted = true;
       }
@@ -488,6 +613,7 @@ async function start(index, sec, audioTrack, subs, audioOpts) {
   session.dir = dir;
   session.pruned = 0;
   session.vod = null;
+  session.cutter = null;
   session.subsRuns = [];
   session.makeSubsArgs = null;
 
@@ -497,7 +623,7 @@ async function start(index, sec, audioTrack, subs, audioOpts) {
   const textTrack = subs && subs.kind === 'track' && (probe.subtitleTracks || []).some((t) => t.index === subs.track && t.text);
   const subsFile = subs && subs.kind === 'file' && subs.path && fs.existsSync(subs.path);
   const from = Math.max(0, sec || 0);
-  const plan = video.copy ? await vodPlan(index, probe.durationSec) : null;
+  const plan = video.copy ? await vodPlan(index, probe.durationSec) : gridPlan(probe);
   if (gen !== session.gen) throw new Error('superseded');
   session.subs = textTrack || subsFile ? subsInfo(probe, subs) : null;
   const url = `http://${host}:${session.port}/${session.token}/${gen}/${session.subs ? 'master' : 'index'}.m3u8`;
@@ -506,14 +632,24 @@ async function start(index, sec, audioTrack, subs, audioOpts) {
     session.vod = plan;
     session.start = 0;
     session.startAt = from;
-    // Нарезка с ключевого кадра сегмента k: время в сегментах абсолютное
-    // (сдвиг выхода равен точке входа), номера сегментов совпадают с планом,
-    // каждый ключевой кадр начинает новый сегмент.
+    // Поток с ключевого кадра, которым начинается сегмент k. Время абсолютное:
+    // сдвиг выхода равен точке входа.
     session.makeArgs = (k) => {
-      const at = String(plan.starts[k] + (k > 0 ? SEEK_EPSILON_SEC : 0));
-      const seek = k > 0 ? { input: ['-noaccurate_seek', '-ss', at], output: ['-output_ts_offset', at] } : { input: [], output: [] };
-      return [...mediaArgs(index, probe, video, audioTrack, audioOpts, seek),
-        ...hlsArgs(dir, 'ff.m3u8', ['-hls_time', '0.001', '-start_number', String(k)])];
+      let seek = { input: [], output: [] };
+      let v = video;
+      if (video.copy) {
+        const at = String(plan.starts[k] + SEEK_EPSILON_SEC);
+        if (k > 0) seek = { input: ['-noaccurate_seek', '-ss', at], output: ['-output_ts_offset', at] };
+      } else {
+        // Точный поиск на полкадра раньше границы: первым выходит кадр сегмента k,
+        // он же первый ключевой. Других ключевых кадров кодер не ставит (-g).
+        if (k > 0) {
+          const at = String(plan.starts[k] - 0.5 / plan.fps);
+          seek = { input: ['-ss', at], output: ['-output_ts_offset', at] };
+        }
+        v = { ...video, args: [...video.args, '-g', '100000', '-force_key_frames', `expr:eq(mod(n,${plan.frames}),0)`] };
+      }
+      return [...mediaArgs(index, probe, v, audioTrack, audioOpts, seek), ...FMP4_ARGS];
     };
     if (textTrack) {
       session.makeSubsArgs = (at, out) => ['-hide_banner', '-loglevel', 'error', '-readrate', SUBS_READ_RATE,
@@ -528,7 +664,7 @@ async function start(index, sec, audioTrack, subs, audioOpts) {
     session.subsWhole = !!subsFile;
     startRun(segmentAt(from));
     console.log('[hls] start vod', { index, from, segments: plan.starts.length, subs: session.subs && session.subs.name });
-    return { url, subs: !!session.subs, start: 0, copy: true };
+    return { url, subs: !!session.subs, start: 0, copy: video.copy };
   }
 
   const realStart = from > 0 && video.copy ? await media.seekStart(index, from) : from;
@@ -537,7 +673,9 @@ async function start(index, sec, audioTrack, subs, audioOpts) {
   const seek = from > 0
     ? { input: [...(video.copy ? ['-noaccurate_seek'] : []), '-ss', String(from)], output: [] }
     : { input: [], output: [] };
-  spawnVideo([...mediaArgs(index, probe, video, audioTrack, audioOpts, seek),
+  const eventVideo = video.copy ? video
+    : { ...video, args: [...video.args, '-force_key_frames', `expr:gte(t,n_forced*${SEGMENT_SEC})`] };
+  spawnVideo([...mediaArgs(index, probe, eventVideo, audioTrack, audioOpts, seek),
     ...hlsArgs(dir, 'index.m3u8', ['-hls_time', String(SEGMENT_SEC)])]);
   if (textTrack || subsFile) {
     // Встроенная дорожка читается из раздачи быстрее нарезки видео, чтобы

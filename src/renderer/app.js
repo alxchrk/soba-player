@@ -294,6 +294,19 @@ setInterval(() => {
   maybePrefetchNext();
 }, 5000);
 
+// Состояние воспроизведения для хуков просмотра (watch-hooks.js): уходит в main
+// только при смене файла или паузы, позиция берётся в этот момент.
+let watchSent = null;
+setInterval(() => {
+  const on = currentInfo && episodes.length && !opening && !playerEl.classList.contains('hidden');
+  const index = on ? episodes[currentListPos].index : null;
+  const playing = !!on && !player.surface.paused;
+  const key = index + ':' + playing;
+  if (key === watchSent) return;
+  watchSent = key;
+  window.api.watchState(index, playing, on ? player.surface.currentTime : 0, currentDur);
+}, 1000);
+
 // Досохранить позицию при паузе и перед закрытием, чтобы не терять последние секунды.
 document.getElementById('video').addEventListener('pause', savePosition);
 window.addEventListener('beforeunload', savePosition);
@@ -647,6 +660,7 @@ shortcutsModal.addEventListener('click', (e) => { if (e.target === shortcutsModa
 const aboutModal = document.getElementById('about-modal');
 async function openAbout() {
   try { document.getElementById('about-version').textContent = t('version') + ' ' + await window.api.appVersion(); } catch (_) {}
+  renderUpdate(updateStateNow); // подпись кнопки на текущем языке
   aboutModal.classList.remove('hidden');
   document.body.classList.add('modal-open');
 }
@@ -658,7 +672,7 @@ window.api.onOpenAbout(openAbout);
 
 // Обновления: статус в окне «О плеере» и всплывающее уведомление, когда
 // новая версия скачана; после обновления один раз сообщение о новой версии.
-const updateStatus = document.getElementById('update-status');
+const updateButton = document.getElementById('update-check');
 const toast = document.getElementById('toast');
 const toastAction = document.getElementById('toast-action');
 const fill = (key, s) => t(key).replace('{v}', s.version || '').replace('{p}', s.percent || 0);
@@ -673,26 +687,30 @@ function showToast(text, action) {
 }
 document.getElementById('toast-close').addEventListener('click', () => toast.classList.add('hidden'));
 const restartAction = () => ({ label: t('updRestart'), run: () => window.api.updateInstall() });
+// Статус пишется на самой кнопке. Нажимается она, только когда есть что
+// сделать: проверить, повторить после ошибки или перезапуститься в новую версию.
 let lastUpdateStatus = null;
+let updateStatusNow = 'idle';
+let updateStateNow = { status: 'idle' };
+const UPDATE_LABELS = {
+  idle: 'checkUpdates', checking: 'updChecking', latest: 'updLatest', downloading: 'updDownloading',
+  ready: 'updRestart', error: 'updRetry', unavailable: 'updUnavailable',
+};
 function renderUpdate(s) {
-  const keys = { checking: 'updChecking', latest: 'updLatest', downloading: 'updDownloading', ready: 'updReady', error: 'updError', unavailable: 'updUnavailable' };
-  updateStatus.textContent = keys[s.status] ? fill(keys[s.status], s) : '';
-  updateStatus.classList.toggle('ready', s.status === 'ready');
-  const restart = updateStatus.querySelector('.about-update-restart');
-  if (s.status === 'ready' && !restart) {
-    const b = document.createElement('button');
-    b.className = 'about-update-restart';
-    b.textContent = t('updRestart');
-    b.addEventListener('click', () => window.api.updateInstall());
-    updateStatus.appendChild(document.createElement('br'));
-    updateStatus.appendChild(b);
-  }
+  updateStateNow = s;
+  updateStatusNow = s.status;
+  updateButton.textContent = fill(UPDATE_LABELS[s.status] || 'checkUpdates', s);
+  updateButton.disabled = !['idle', 'error', 'ready'].includes(s.status);
+  updateButton.dataset.state = s.status;
   if (s.status === 'ready' && lastUpdateStatus !== 'ready') showToast(fill('updReady', s), restartAction());
   lastUpdateStatus = s.status;
 }
 window.api.onUpdateState(renderUpdate);
 window.api.updateState().then(renderUpdate).catch(() => {});
-document.getElementById('update-check').addEventListener('click', () => window.api.updateCheck().then(renderUpdate));
+updateButton.addEventListener('click', () => {
+  if (updateStatusNow === 'ready') return window.api.updateInstall();
+  window.api.updateCheck().then(renderUpdate);
+});
 window.api.updatedFrom().then(async (from) => {
   if (from) showToast(t('updUpdated').replace('{v}', await window.api.appVersion()));
 }).catch(() => {});

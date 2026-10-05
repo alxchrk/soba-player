@@ -499,8 +499,12 @@ function summarizeProbe(raw) {
     .filter((c, i, arr) => i === 0 || c.start > arr[i - 1].start);
   return {
     durationSec: parseFloat(raw.format && raw.format.duration) || null,
+    title: (raw.format && raw.format.tags && raw.format.tags.title) || null,
     formatName: (raw.format && raw.format.format_name) || '',
-    video: v ? { codec: v.codec_name, width: v.width, height: v.height, pixFmt: v.pix_fmt || '' } : null,
+    video: v ? {
+      codec: v.codec_name, width: v.width, height: v.height, pixFmt: v.pix_fmt || '',
+      fps: constantFps(v), startSec: parseFloat(v.start_time) || 0,
+    } : null,
     audioTracks,
     subtitleTracks,
     chapters,
@@ -692,6 +696,18 @@ function aheadSecondsOf(index) {
   if (!speed.pos || speed.pos.index !== index) return null;
   const a = aheadSeconds();
   return a ? a.sec : null;
+}
+
+// Частота кадров видео с постоянной частотой; null, если частота переменная
+// или неизвестна (r_frame_rate и avg_frame_rate расходятся).
+function constantFps(v) {
+  const num = (s) => {
+    const m = /^(\d+)\/(\d+)$/.exec(s || '');
+    return m && Number(m[2]) ? Number(m[1]) / Number(m[2]) : 0;
+  };
+  const r = num(v.r_frame_rate);
+  const a = num(v.avg_frame_rate);
+  return r > 0 && a > 0 && Math.abs(r - a) / r < 0.001 ? r : null;
 }
 
 // Путь к файлу на диске: в папке раздачи или сам локальный файл.
